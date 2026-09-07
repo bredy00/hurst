@@ -28,6 +28,7 @@ import matplotlib.pyplot as plt
 
 import volsurf_core as vc
 import volatility_surface_3 as v3
+import sources.replay as replay
 
 OUT = pathlib.Path(__file__).parent / "captures"
 FRAMES = OUT / "frames_v3"
@@ -41,6 +42,18 @@ EXPIRIES = ["20260907", "20260909", "20260911", "20260914", "20260916",
             "20260921", "20261002", "20261016"]
 HALF_SPREAD = 0.005
 TICK = 0.01
+
+
+def fbm(n, H, rng):
+    """Exact fBm by Davies-Harte circulant embedding -- the log-vol path."""
+    k = np.arange(0, n)
+    g = 0.5 * (np.abs(k + 1) ** (2 * H) - 2 * np.abs(k) ** (2 * H)
+               + np.abs(k - 1) ** (2 * H))
+    c = np.concatenate([g, [0.0], g[:0:-1]])
+    lam = np.maximum(np.fft.fft(c).real, 0.0)
+    m = len(c)
+    z = rng.normal(size=m) + 1j * rng.normal(size=m)
+    return np.cumsum(np.fft.fft(np.sqrt(lam / (2 * m)) * z).real[:n])
 
 
 def true_forward(tau):
@@ -178,6 +191,40 @@ def main():
         print(f"  planted H = {H_TRUE:.3f}   recovered H = {H:.4f}{e}  "
               f"(error {abs(H-H_TRUE):.4f}, r2 = {r2:.4f})")
 
+    # A realised log-volatility path carrying the SAME planted H, so the two
+    # independent estimators can be compared against each other and against
+    # the truth. The surface route reads the option chain; this one reads the
+    # underlying's own path.
+    log_vol = 0.15 * fbm(2 ** 16, H_TRUE, np.random.default_rng(21))
+    st = v3.hurst_status(log_vol)
+    print(f"  H from the realised path  = {st['H']:.4f}  "
+          f"(planted {H_TRUE}, linearity r2 = {st['linearity_r2']:.4f})")
+    if res:
+        agr = v3.hurst_agreement(res[0], st['H'])
+        print(f"  the two estimates agree   : {agr['agree']}  (gap {agr['gap']:.4f})")
+
+    flags = v3.audit_surface(pts, ctxs)
+    n_bf = sum(len(f['butterfly']) for f in flags.values())
+    n_cal = sum(len(f['calendar']) for f in flags.values())
+    print(f"  arbitrage audit           : {n_bf} butterfly, {n_cal} calendar")
+
+    import fit.svi as svi
+    front = sorted(pts, key=lambda e: ctxs[e].tau)[0]
+    rows = pts[front]
+    fp = svi.fit_slice([r['k'] for r in rows], [r['w'] for r in rows],
+                       weights=[r['weight'] for r in rows], tau=ctxs[front].tau)
+    if fp:
+        print(f"  SVI front slice           : rmse {fp['rmse']:.3e}, "
+              f"Durrleman {'ok' if fp['durrleman'] else 'VIOLATED'}")
+        Kd, dens = v3.slice_density(fp, ctxs[front].tau, ctxs[front].forward,
+                                    ctxs[front].discount)
+        g = np.isfinite(dens)
+        print(f"  risk-neutral density      : mass {float(np.trapezoid(dens[g], Kd[g])):.5f}, "
+              f"min {float(np.nanmin(dens)):.3e}")
+
+    snap = replay.record(app, ctxs, OUT / "snapshot.json", symbol="SPY")
+    print(f"  recorded snapshot         : {replay.summary(snap)}")
+
     # --- render --------------------------------------------------------------
     n_frames, state = 16, {"i": 0}
 
@@ -197,7 +244,7 @@ def main():
     # survives that import.
     plt.pause = capture_pause
     print(f"\nRendering {n_frames} frames ...")
-    v3.live_desktop_plot(app, ctxs, max_age=1e9)
+    v3.live_desktop_plot(app, ctxs, max_age=1e9, log_vol_series=log_vol)
 
     files = sorted(FRAMES.glob("frame_*.png"))
     print(f"Captured {len(files)} frames -> {FRAMES}")
