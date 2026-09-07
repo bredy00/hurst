@@ -99,9 +99,42 @@ roughness `H = 0.12`, then tells the pipeline neither.
 - **recovered H = 0.1205** against a planted 0.120, r2 = 1.0000
 - sigma band widens from +/-3.6% at 3 days to +/-19.6% at 42 days, as it must
 
+## Session A (2026-09-07) -- the surface is finished
+
+| | |
+|---|---|
+| **A1** | Butterfly + calendar audit wired into the live view. Calendar probes fixed **k**, not fixed z -- the condition is `dw/dtau >= 0` at `k = ln(K/F_tau)`, and at one fixed k the z values across three maturities were 2.06 / 1.00 / 0.58, i.e. entirely different moneyness |
+| **A2** | `fit/svi.py`: raw SVI, **scipy-free** via the Zeliade reduction (fix `(m, sigma)` and the rest is linear). Recovers planted parameters to **1.4e-08** |
+| **A3** | Risk-neutral density panel off the **fitted** slice on a dense **uniform** grid. Mass 0.9997, mean = forward to 0.01 |
+| **A4** | Second, independent H from the realised log-vol path via the structure function, shown beside the skew estimate with a divergence flag |
+| **A5** | `sources/replay.py`: JSON record/replay. Replayed surface points and H are bit-identical to the recorded ones |
+
+Three bugs found and fixed while building it, each caught by a test rather than
+assumed away:
+
+- **Durrleman was judging extrapolation.** Evaluating `g(k)` over a fixed +/-2
+  scored a 42-day slice fitted on `|k| <= 0.196` at **-216092**; over its own
+  data range it is **+0.113**. Now data-aware, with the wings reported separately.
+- **The density range ran away.** An arbitrage-violating slice is not a density,
+  so its mass never reaches 1 and a mass-driven loop widened to `K = 0..5.9e8`
+  with `dK = 33282`, hiding the negative region the panel exists to show. Capped.
+- **Sizing the density grid from the wing volatility does not work.** SVI total
+  variance grows linearly in `|k|`, so `half = n_sigma*sigma(half)*sqrt(tau)` is
+  a fixed point iteration settling near `n_sigma^2 * b(1+|rho|)`.
+
+`butterfly_violations` is now documented as a raw-grid convexity **heuristic** --
+useful for catching a single bad print, but not the arbitrage condition. The
+rigorous test is Durrleman `g(k) >= 0` on the fit, or a negative density.
+
+End-to-end on the synthetic surface: planted `H = 0.120` recovered as
+**0.1199 +/- 0.0009** from the skew and **0.1178** from the path (gap 0.0022,
+agree), forward recovered to 0.0036, density mass 0.99967.
+
+**179 tests green**: `test_core.py` 87, `test_fixes.py` 47, `test_surface.py` 45.
+
 ## Still open
 
-SVI / eSSVI slice fitting; butterfly and calendar audits wired into the live view
-(the detectors exist in `volsurf_core`, nothing calls them yet); Kalman smoothing
-of the fitted parameters; replay source; rough Bergomi and the Heston jump-diffusion
-with a Hawkes-style self-exciting intensity rather than constant-lambda Poisson.
+eSSVI (a shared parameterisation that is calendar-arbitrage-free by construction;
+`essvi_calendar_ok` currently measures the violation rather than preventing it);
+Kalman smoothing of the fitted parameters; then Sessions B-F in
+`docs/superpowers/plans/2026-09-07-rough-heston-pipeline.md`.
