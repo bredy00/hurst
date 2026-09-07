@@ -8,16 +8,21 @@ alpha/capture_alpha.py                stand-in feed -> alpha's own plot code
 volatility_surface_2.py               six runtime fixes, maths untouched
 volsurf_core.py                       pure maths: no IO, no scipy, no matplotlib
 volatility_surface_3.py               v2's fixes + correct coordinates
+fit/svi.py                            raw SVI slice fitting, scipy-free
+sources/replay.py                     JSON record / replay of a chain snapshot
 capture_v2.py / capture_v3.py         stand-in feeds + comparison images
-test_fixes.py                         47 checks   (runtime behaviour)
-test_core.py                          55 checks   (the maths)
-captures/                             frames, GIFs, alpha_vs_v2.png, alpha_vs_v3.png
+test_core.py                          87 checks   (the maths)
+test_fixes.py                         47 checks   (IBKR runtime behaviour)
+test_surface.py                       45 checks   (audit, SVI, density, replay)
+docs/superpowers/plans/               the six-session rough Heston plan
+captures/                             frames, GIFs, comparisons, snapshot.json
 .venv/                                python 3.12.3
 ```
 
 ```bash
-.venv/Scripts/python.exe test_core.py     # 55 passed
+.venv/Scripts/python.exe test_core.py     # 87 passed
 .venv/Scripts/python.exe test_fixes.py    # 47 passed
+.venv/Scripts/python.exe test_surface.py  # 45 passed
 .venv/Scripts/python.exe capture_v3.py    # re-render + end-to-end validation
 ```
 
@@ -96,7 +101,7 @@ roughness `H = 0.12`, then tells the pipeline neither.
 - worst forward error **0.0036** (0.0006% of spot); using spot as the forward
   would be off by 2.187 at 42 days
 - parity r2 = 1.00000 on every expiry
-- **recovered H = 0.1205** against a planted 0.120, r2 = 1.0000
+- **recovered H = 0.1199 +/- 0.0009** against a planted 0.120, r2 = 1.0000
 - sigma band widens from +/-3.6% at 3 days to +/-19.6% at 42 days, as it must
 
 ## Session A (2026-09-07) -- the surface is finished
