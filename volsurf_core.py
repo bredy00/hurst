@@ -515,8 +515,14 @@ def breeden_litzenberger(strikes, call_prices, df=1.0):
 # --- arbitrage --------------------------------------------------------------
 def butterfly_violations(ks, ws):
     """
-    Indices where total variance is not convex in k, i.e. a negative butterfly.
-    A violation is bad DATA, not a bad market -- flag it, never smooth it away.
+    Indices where total variance is not convex in k on the RAW grid.
+
+    This is a data-sanity heuristic, not the arbitrage condition. The rigorous
+    no-butterfly test is Gatheral's g(k) >= 0 (see fit/svi.py) or, equivalently,
+    a non-negative risk-neutral density; convexity of w in k is neither
+    necessary nor sufficient for it. What this is good for is exactly what it
+    is used for here: catching a single bad print that dents an otherwise smooth
+    slice. Flag it, never smooth it away.
     """
     k = np.asarray(ks, dtype=float)
     w = np.asarray(ws, dtype=float)
