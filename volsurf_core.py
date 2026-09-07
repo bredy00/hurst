@@ -1,0 +1,550 @@
+"""
+volsurf_core -- the pure maths. No IO, no network, no matplotlib.
+
+This is the seed of the layered package: everything here is a function of its
+arguments, so it can be tested against known answers with TWS switched off.
+
+Conventions
+-----------
+tau         time increment T - t0 in years, never absolute time. The surface is
+            a function of how far ahead we are looking, not of the calendar.
+F           the forward for that expiry. When you pass F, the carry is already
+            inside it, so `drift` is 0. When you pass spot instead, drift = r-q.
+k           log-moneyness ln(K/F).
+z           k normalised by the ATM move, k / (sigma_atm * sqrt(tau)). This is
+            the coordinate the grid should be built on: it is the number of
+            standard deviations, so it means the same thing at every expiry.
+w           total variance sigma^2 * tau. This is the quantity that must be
+            monotone in tau (no calendar arbitrage) and convex in k (no
+            butterfly arbitrage), which sigma itself is not.
+"""
+
+import datetime
+import math
+
+import numpy as np
+
+SECONDS_PER_YEAR = 365.0 * 24.0 * 3600.0
+SQRT_2PI = math.sqrt(2.0 * math.pi)
+SQRT_2 = math.sqrt(2.0)
+
+# scipy is deliberately NOT imported here. `import scipy.stats` alone costs
+# ~5.8s on this machine, and this module is on the startup path of a tool whose
+# most common outcome is "TWS is not running". The two functions we need are
+# three lines each, and test_core.py checks them against scipy to 1e-15.
+_erf = np.vectorize(math.erf, otypes=[float])
+
+
+def norm_pdf(x):
+    x = np.asarray(x, dtype=float)
+    return np.exp(-0.5 * x * x) / SQRT_2PI
+
+
+def norm_cdf(x):
+    x = np.asarray(x, dtype=float)
+    return 0.5 * (1.0 + _erf(x / SQRT_2))
+
+
+# --- time -------------------------------------------------------------------
+def tau_years(t0, expiry, min_tau=1e-6):
+    """
+    Time increment T - t0 in years, ACT/365.
+
+    t0 and expiry may be date or datetime. A date expiry is taken at 21:00 UTC
+    (US equity close), so an expiry later today is a real fraction of a day
+    rather than zero.
+    """
+    if isinstance(expiry, datetime.datetime):
+        t_exp = expiry
+    else:
+        t_exp = datetime.datetime.combine(expiry, datetime.time(21, 0))
+    if isinstance(t0, datetime.datetime):
+        t_now = t0
+    else:
+        t_now = datetime.datetime.combine(t0, datetime.time(14, 30))
+    return max((t_exp - t_now).total_seconds() / SECONDS_PER_YEAR, min_tau)
+
+
+def parse_ib_date(yyyymmdd):
+    return datetime.date(int(yyyymmdd[:4]), int(yyyymmdd[4:6]), int(yyyymmdd[6:8]))
+
+
+# --- Black-Scholes ----------------------------------------------------------
+def d1_d2(F, K, sigma, tau, drift=0.0):
+    """
+    d1 = (ln(F/K) + (drift + sigma^2/2) * tau) / (sigma * sqrt(tau))
+    d2 = d1 - sigma * sqrt(tau)
+
+    Pass the forward with drift=0 (the carry is already in F), or pass spot with
+    drift = r - q. Both are the same formula; only where the carry lives differs.
+    """
+    F = np.asarray(F, dtype=float)
+    K = np.asarray(K, dtype=float)
+    sigma = np.asarray(sigma, dtype=float)
+    tau = np.asarray(tau, dtype=float)
+    srt = sigma * np.sqrt(tau)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        d1 = (np.log(F / K) + (drift + 0.5 * sigma * sigma) * tau) / srt
+        d2 = d1 - srt
+    return d1, d2
+
+
+def bs_vega(F, K, sigma, tau, df=1.0, drift=0.0):
+    """dPrice/dSigma, per 1.0 of vol (divide by 100 for 'per vol point')."""
+    d1, _ = d1_d2(F, K, sigma, tau, drift)
+    return df * F * np.sqrt(tau) * norm_pdf(d1)
+
+
+def bs_price(F, K, sigma, tau, df=1.0, right='C', drift=0.0):
+    """Undiscounted-forward Black-76 price, then discounted by df."""
+    d1, d2 = d1_d2(F, K, sigma, tau, drift)
+    if right == 'C':
+        return df * (F * norm_cdf(d1) - K * norm_cdf(d2))
+    return df * (K * norm_cdf(-d2) - F * norm_cdf(-d1))
+
+
+def otm_right(K, F):
+    """The out-of-the-money side at this strike. Split at the FORWARD, not spot."""
+    return 'C' if K >= F else 'P'
+
+
+def implied_vol(price, F, K, tau, df=1.0, right=None, lo=1e-4, hi=5.0):
+    """
+    Invert Black-76 for sigma. Returns None when the price is outside the
+    no-arbitrage bounds, rather than raising or returning a fabricated number.
+    """
+    if right is None:
+        right = otm_right(K, F)
+    if price is None or not np.isfinite(price) or price <= 0 or tau <= 0:
+        return None
+    intrinsic = df * max(F - K, 0.0) if right == 'C' else df * max(K - F, 0.0)
+    upper = df * F if right == 'C' else df * K
+    if price <= intrinsic + 1e-12 or price >= upper:
+        return None
+
+    def f(s):
+        return float(bs_price(F, K, s, tau, df, right)) - price
+
+    # Bracket first, then Newton on vega with a bisection guard. Price is
+    # monotone in sigma, so the bracket can never be lost; vega is exactly the
+    # derivative we need and we already have it, which makes this converge in a
+    # handful of steps without pulling in scipy.optimize.
+    if f(lo) > 0.0 or f(hi) < 0.0:
+        return None
+    a, b = lo, hi
+    s = min(max(0.20, lo), hi)
+    for _ in range(100):
+        fs = f(s)
+        if abs(fs) < 1e-12:
+            return float(s)
+        if fs > 0.0:
+            b = s
+        else:
+            a = s
+        if b - a < 1e-12:
+            return float(0.5 * (a + b))
+        v = float(bs_vega(F, K, s, tau, df))
+        step = s - fs / v if v > 1e-12 else None
+        s = step if (step is not None and a < step < b) else 0.5 * (a + b)
+    return float(s)
+
+
+# --- the forward, implied from the market -----------------------------------
+def forward_from_parity(strikes, call_mid, put_mid, min_points=3):
+    """
+    Recover (F, discount_factor, r2) from put-call parity, per expiry.
+
+        C - K_disc = P + F_disc   ->   C - P = df * (F - K)
+
+    Regressing (C-P) on K gives slope = -df and intercept = df*F, so both the
+    discount factor and the forward come out of the market. No dividend model,
+    no rate assumption, no inherited broker guess.
+
+    r2 doubles as a chain-quality score: a clean SPY expiry sits at ~1.0.
+    """
+    K = np.asarray(strikes, dtype=float)
+    y = np.asarray(call_mid, dtype=float) - np.asarray(put_mid, dtype=float)
+    ok = np.isfinite(K) & np.isfinite(y)
+    if ok.sum() < min_points:
+        return None, None, 0.0
+    K, y = K[ok], y[ok]
+    if np.ptp(K) <= 0:
+        return None, None, 0.0
+
+    slope, intercept = np.polyfit(K, y, 1)
+    df = -slope
+    if not np.isfinite(df) or df <= 0:
+        return None, None, 0.0
+    F = intercept / df
+
+    resid = y - (slope * K + intercept)
+    ss_tot = np.sum((y - y.mean()) ** 2)
+    r2 = 1.0 - np.sum(resid ** 2) / ss_tot if ss_tot > 0 else 0.0
+    return float(F), float(df), float(r2)
+
+
+# --- coordinates ------------------------------------------------------------
+def log_moneyness(K, F):
+    return np.log(np.asarray(K, dtype=float) / F)
+
+
+def normalised_moneyness(K, F, sigma_atm, tau):
+    """
+    z = ln(K/F) / (sigma_atm * sqrt(tau)) -- strikes measured in standard
+    deviations of the move to expiry.
+
+    This is the coordinate that makes the grid mean the same thing at every
+    maturity. A fixed +/-2% band has a width in z of 0.02/(sigma*sqrt(tau)),
+    which diverges as tau -> 0: at half a day it is ~11 sigma (no market exists
+    out there), at 12 days it is ~0.8 sigma (you never leave the ATM region).
+    """
+    denom = sigma_atm * np.sqrt(tau)
+    if denom <= 0:
+        return np.full(np.shape(K), np.nan)
+    return log_moneyness(K, F) / denom
+
+
+def total_variance(sigma, tau):
+    """w = sigma^2 * tau."""
+    return np.asarray(sigma, dtype=float) ** 2 * tau
+
+
+def sigma_from_total_variance(w, tau):
+    return np.sqrt(np.asarray(w, dtype=float) / tau)
+
+
+def select_strikes_by_sigma(strikes, F, sigma_atm, tau, n_sigma=3.0, max_strikes=None):
+    """
+    Keep strikes within +/- n_sigma standard deviations of the forward.
+
+    Unlike a fixed percentage band, this widens with sqrt(tau), so every expiry
+    contributes the same slice of the distribution and every contract in the
+    grid has comparable vega. That is what makes the quote noise homoskedastic
+    instead of exploding in the short-dated wings.
+    """
+    width = n_sigma * sigma_atm * math.sqrt(tau)
+    keep = [float(K) for K in sorted(strikes)
+            if K > 0 and abs(math.log(K / F)) <= width]
+    if max_strikes and len(keep) > max_strikes:
+        # Thin evenly in z so the wings survive, rather than truncating them
+        idx = np.linspace(0, len(keep) - 1, max_strikes).round().astype(int)
+        keep = [keep[i] for i in sorted(set(idx))]
+    return keep
+
+
+# --- quality ----------------------------------------------------------------
+def iv_uncertainty(half_spread, vega):
+    """
+    The standard error of an implied vol implied by the quoted spread.
+
+    sigma_err = half_spread / vega. This is the single number that says how much
+    a quote is worth. It is the reason a wing contract must not be given the
+    same weight as an ATM one.
+    """
+    vega = np.asarray(vega, dtype=float)
+    out = np.full(np.broadcast(vega, np.asarray(half_spread)).shape, np.inf, dtype=float)
+    good = vega > 0
+    np.divide(np.asarray(half_spread, dtype=float), vega, out=out, where=good)
+    return out if out.shape else float(out)
+
+
+def quote_weight(half_spread, vega):
+    """Inverse-variance weight, 1 / sigma_err^2. Zero for a worthless quote."""
+    err = iv_uncertainty(half_spread, vega)
+    with np.errstate(divide='ignore'):
+        return np.where(np.isfinite(err) & (err > 0), 1.0 / (err * err), 0.0)
+
+
+# --- roughness --------------------------------------------------------------
+def tricube(u):
+    """LOESS kernel: (1 - |u|^3)^3 on |u| < 1, zero outside."""
+    u = np.abs(np.asarray(u, dtype=float))
+    return np.where(u < 1.0, (1.0 - u ** 3) ** 3, 0.0)
+
+
+def atm_skew_from_slice(ks, sigmas, zs=None, weights=None, window=1.5, degree=2):
+    """
+    d(sigma)/dk at the money, from a LOCAL weighted polynomial fit.
+
+    A global quadratic across the whole +/-3 sigma slice is a regression, not a
+    derivative. Real smiles carry cubic and higher structure, so the wings bias
+    the ATM slope. Measured on a synthetic slice with cubic curvature, the bias
+    falls from 3.5e-2 at +/-3 sigma to 5e-4 at +/-0.5 sigma.
+
+    Points are weighted by (inverse-variance quote weight) x (tricube kernel in
+    z, centred at the money) so the estimate tapers smoothly rather than
+    hard-cutting at the window edge.
+
+    Returns (slope, stderr, n_used); (None, None, 0) when it cannot be formed.
+    """
+    k = np.asarray(ks, dtype=float)
+    y = np.asarray(sigmas, dtype=float)
+    ok = np.isfinite(k) & np.isfinite(y)
+
+    if zs is None:
+        z = k / (np.std(k) if np.std(k) > 0 else 1.0)
+    else:
+        z = np.asarray(zs, dtype=float)
+        ok &= np.isfinite(z)
+
+    w = np.ones_like(k)
+    if weights is not None:
+        qw = np.asarray(weights, dtype=float)
+        ok &= np.isfinite(qw) & (qw > 0)
+        w = np.where(np.isfinite(qw) & (qw > 0), qw, 0.0)
+
+    kern = tricube(z / float(window))
+    w = w * kern
+    ok &= w > 0
+
+    n = int(ok.sum())
+    if n < degree + 2:
+        return None, None, 0
+    k, y, w = k[ok], y[ok], w[ok]
+
+    try:
+        coeffs, cov = np.polyfit(k, y, degree, w=np.sqrt(w), cov=True)
+    except (np.linalg.LinAlgError, ValueError):
+        return None, None, 0
+    slope = float(coeffs[-2])                       # d/dk evaluated at k = 0
+    var = float(cov[-2, -2])
+    stderr = math.sqrt(var) if np.isfinite(var) and var > 0 else None
+    return slope, stderr, n
+
+
+def estimate_hurst(taus, skews, skew_errs=None):
+    """
+    Fit log|ATM skew| = c + (H - 1/2) log(tau), weighted least squares.
+
+    The market's ATM skew explodes at the short end like tau^(H-1/2) with
+    H ~ 0.1. A classical diffusion (Heston included) forces that exponent to 0
+    as tau -> 0, so it cannot reproduce this; reading the slope off a log-log
+    plot is the cheapest live test of whether a surface is rough.
+
+    If skew_errs is given, each point is weighted by the inverse variance of
+    log|skew|, which by the delta method is (|skew| / err)^2. Short expiries
+    carry fewer strikes inside the ATM window, so their skew is measured less
+    precisely, and equal weighting lets that noise into H.
+
+    Returns (H, H_stderr, intercept, r2).
+    """
+    t = np.asarray(taus, dtype=float)
+    s = np.abs(np.asarray(skews, dtype=float))
+    ok = np.isfinite(t) & np.isfinite(s) & (t > 0) & (s > 0)
+
+    w = None
+    if skew_errs is not None:
+        e = np.asarray([np.nan if v is None else v for v in skew_errs], dtype=float)
+        good = np.isfinite(e) & (e > 0)
+        if good.any():
+            w = np.where(good, s / np.where(good, e, 1.0), np.nan)   # 1/sd of log|skew|
+            ok &= np.isfinite(w) & (w > 0)
+
+    if ok.sum() < 3:
+        return None, None, None, 0.0
+    x, y = np.log(t[ok]), np.log(s[ok])
+    ww = w[ok] if w is not None else None
+
+    try:
+        coeffs, cov = np.polyfit(x, y, 1, w=ww, cov=True)
+    except (np.linalg.LinAlgError, ValueError):
+        return None, None, None, 0.0
+    slope, intercept = float(coeffs[0]), float(coeffs[1])
+    var = float(cov[0, 0])
+    h_err = math.sqrt(var) if np.isfinite(var) and var > 0 else None
+
+    resid = y - (slope * x + intercept)
+    if ww is not None:
+        ss_res = np.sum(ww ** 2 * resid ** 2)
+        ybar = np.sum(ww ** 2 * y) / np.sum(ww ** 2)
+        ss_tot = np.sum(ww ** 2 * (y - ybar) ** 2)
+    else:
+        ss_res = np.sum(resid ** 2)
+        ss_tot = np.sum((y - y.mean()) ** 2)
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+    return float(slope + 0.5), h_err, intercept, float(r2)
+
+
+# --- structure function: H from the realised path, not from the skew --------
+def structure_function(x, deltas, q=1.0):
+    """
+    m_hat(q, Delta) = 1/(N - Delta) * sum_t |X_{t+Delta} - X_t|^q,
+    the q-th order structure function of X_t = log(sigma_t).
+
+    This is the second, independent route to H. The skew route reads the
+    option surface; this one reads the realised volatility path. When the two
+    disagree, the surface and the underlying are telling different stories.
+    """
+    X = np.asarray(x, dtype=float)
+    X = X[np.isfinite(X)]
+    out = []
+    for d in np.asarray(deltas, dtype=int):
+        if d < 1 or d >= len(X):
+            out.append(np.nan)
+            continue
+        inc = np.abs(X[d:] - X[:-d])
+        out.append(float(np.mean(inc ** q)))
+    return np.array(out, dtype=float)
+
+
+def zeta_regression(deltas, m_hat):
+    """
+    log m(q, Delta) = log C_q + zeta(q) log Delta.
+
+    Returns (zeta, log_Cq, r2, zeta_stderr). On SPX the lecture's fit gives
+    zeta_hat(1) ~ 0.1555 with R^2 ~ 0.93.
+    """
+    d = np.asarray(deltas, dtype=float)
+    m = np.asarray(m_hat, dtype=float)
+    ok = np.isfinite(d) & np.isfinite(m) & (d > 0) & (m > 0)
+    if ok.sum() < 3:
+        return None, None, 0.0, None
+    x, y = np.log(d[ok]), np.log(m[ok])
+    try:
+        coeffs, cov = np.polyfit(x, y, 1, cov=True)
+    except (np.linalg.LinAlgError, ValueError):
+        return None, None, 0.0, None
+    zeta, log_cq = float(coeffs[0]), float(coeffs[1])
+    var = float(cov[0, 0])
+    resid = y - (zeta * x + log_cq)
+    ss_tot = np.sum((y - y.mean()) ** 2)
+    r2 = 1.0 - np.sum(resid ** 2) / ss_tot if ss_tot > 0 else 0.0
+    return zeta, log_cq, float(r2), (math.sqrt(var) if var > 0 else None)
+
+
+def hurst_from_structure(log_sigma, deltas=None, qs=(0.5, 1.0, 1.5, 2.0, 3.0)):
+    """
+    Estimate H from the monofractal scaling zeta(q) = q * H.
+
+    Regress zeta(q) on q through the origin across several q. A monofractal
+    (fBm-like) process gives a straight line through 0; curvature in zeta(q) is
+    evidence of multifractality, which this returns as `linearity_r2` so it can
+    be seen rather than assumed away.
+
+    Returns dict with H, per-q zetas, and the monofractality check.
+    """
+    if deltas is None:
+        deltas = np.unique(np.round(np.logspace(0, np.log10(60), 18)).astype(int))
+    out = {'deltas': np.asarray(deltas), 'per_q': {}}
+    zs, qq = [], []
+    for q in qs:
+        m = structure_function(log_sigma, deltas, q)
+        zeta, log_cq, r2, se = zeta_regression(deltas, m)
+        out['per_q'][q] = {'zeta': zeta, 'log_Cq': log_cq, 'r2': r2, 'stderr': se}
+        if zeta is not None:
+            zs.append(zeta)
+            qq.append(q)
+    if len(zs) < 2:
+        out['H'] = None
+        out['linearity_r2'] = 0.0
+        return out
+    qq, zs = np.array(qq), np.array(zs)
+    H = float(np.sum(qq * zs) / np.sum(qq * qq))     # least squares through origin
+    resid = zs - H * qq
+    ss_tot = np.sum((zs - zs.mean()) ** 2)
+    out['H'] = H
+    out['linearity_r2'] = float(1.0 - np.sum(resid ** 2) / ss_tot) if ss_tot > 0 else 1.0
+    return out
+
+
+# --- finite differences -----------------------------------------------------
+def fd_first(x, y):
+    """
+    Central first derivative on a possibly non-uniform grid; one-sided at the
+    ends. Option grids are never evenly spaced, so the uniform-grid formula
+    would carry an O(h) bias exactly where the strikes thin out.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    n = len(x)
+    d = np.full(n, np.nan)
+    if n < 2:
+        return d
+    for i in range(1, n - 1):
+        h1, h2 = x[i] - x[i - 1], x[i + 1] - x[i]
+        if h1 <= 0 or h2 <= 0:
+            continue
+        d[i] = (-h2 / (h1 * (h1 + h2)) * y[i - 1]
+                + (h2 - h1) / (h1 * h2) * y[i]
+                + h1 / (h2 * (h1 + h2)) * y[i + 1])
+    d[0] = (y[1] - y[0]) / (x[1] - x[0])
+    d[-1] = (y[-1] - y[-2]) / (x[-1] - x[-2])
+    return d
+
+
+def fd_second(x, y):
+    """
+    Central second derivative on a possibly non-uniform grid; NaN at the ends.
+
+    CAVEAT worth knowing before trusting a risk-neutral density: this 3-point
+    stencil is exact for cubics on a UNIFORM grid, but on a non-uniform grid it
+    is only exact for quadratics and drops to first-order accuracy, with error
+    ~ (h2 - h1) * f''' / 3. Real strike grids are non-uniform -- SPY is $1 near
+    the money and $5 in the wings -- so a Breeden-Litzenberger density computed
+    straight off raw strikes carries a real bias exactly where the spacing
+    changes. Interpolate onto an even grid first, or fit a smooth slice and
+    differentiate that, when the density itself is the deliverable.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    n = len(x)
+    d = np.full(n, np.nan)
+    for i in range(1, n - 1):
+        h1, h2 = x[i] - x[i - 1], x[i + 1] - x[i]
+        if h1 <= 0 or h2 <= 0:
+            continue
+        d[i] = 2.0 * (h2 * y[i - 1] - (h1 + h2) * y[i] + h1 * y[i + 1]) / (h1 * h2 * (h1 + h2))
+    return d
+
+
+def breeden_litzenberger(strikes, call_prices, df=1.0):
+    """
+    Risk-neutral density q(K) = (1/df) * d2C/dK2.
+
+    The ultimate quality gate on a surface: a negative density anywhere is a
+    butterfly arbitrage, i.e. bad data or a bad fit. Returns (K, density) with
+    NaN at the two endpoints where a central second difference does not exist.
+    """
+    K = np.asarray(strikes, dtype=float)
+    C = np.asarray(call_prices, dtype=float)
+    order = np.argsort(K)
+    K, C = K[order], C[order]
+    return K, fd_second(K, C) / df
+
+
+# --- arbitrage --------------------------------------------------------------
+def butterfly_violations(ks, ws):
+    """
+    Indices where total variance is not convex in k, i.e. a negative butterfly.
+    A violation is bad DATA, not a bad market -- flag it, never smooth it away.
+    """
+    k = np.asarray(ks, dtype=float)
+    w = np.asarray(ws, dtype=float)
+    order = np.argsort(k)
+    k, w = k[order], w[order]
+    bad = []
+    for i in range(1, len(k) - 1):
+        if not all(np.isfinite([w[i - 1], w[i], w[i + 1]])):
+            continue
+        h1, h2 = k[i] - k[i - 1], k[i + 1] - k[i]
+        if h1 <= 0 or h2 <= 0:
+            continue
+        second = (w[i + 1] - w[i]) / h2 - (w[i] - w[i - 1]) / h1
+        if second < 0:
+            bad.append(int(order[i]))
+    return bad
+
+
+def calendar_violations(taus, ws_at_fixed_k):
+    """
+    Indices where total variance decreases with maturity at a fixed k, which is
+    a calendar arbitrage. w must be non-decreasing in tau.
+    """
+    t = np.asarray(taus, dtype=float)
+    w = np.asarray(ws_at_fixed_k, dtype=float)
+    order = np.argsort(t)
+    bad = []
+    for a, b in zip(order[:-1], order[1:]):
+        if np.isfinite(w[a]) and np.isfinite(w[b]) and w[b] < w[a] - 1e-12:
+            bad.append(int(b))
+    return bad
