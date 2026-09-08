@@ -10,10 +10,14 @@ volsurf_core.py                       pure maths: no IO, no scipy, no matplotlib
 volatility_surface_3.py               v2's fixes + correct coordinates
 fit/svi.py                            raw SVI slice fitting, scipy-free
 sources/replay.py                     JSON record / replay of a chain snapshot
+models/heston.py                      Heston cf (Albrecher branch) + MC
+pricing/fourier.py                    Lewis + Carr-Madan, adaptive composite quadrature
 capture_v2.py / capture_v3.py         stand-in feeds + comparison images
 test_core.py                          87 checks   (the maths)
 test_fixes.py                         47 checks   (IBKR runtime behaviour)
 test_surface.py                       45 checks   (audit, SVI, density, replay)
+test_models.py                        20 checks   (Heston cf)
+test_pricing.py                       29 checks   (Fourier pricers)
 docs/superpowers/plans/               the six-session rough Heston plan
 captures/                             frames, GIFs, comparisons, snapshot.json
 .venv/                                python 3.12.3
@@ -23,6 +27,9 @@ captures/                             frames, GIFs, comparisons, snapshot.json
 .venv/Scripts/python.exe test_core.py     # 87 passed
 .venv/Scripts/python.exe test_fixes.py    # 47 passed
 .venv/Scripts/python.exe test_surface.py  # 45 passed
+.venv/Scripts/python.exe test_models.py   # 20 passed
+.venv/Scripts/python.exe test_pricing.py  # 29 passed
+.venv/Scripts/python.exe capture_heston.py # Phase 1 skew baseline
 .venv/Scripts/python.exe capture_v3.py    # re-render + end-to-end validation
 ```
 
@@ -136,6 +143,54 @@ End-to-end on the synthetic surface: planted `H = 0.120` recovered as
 agree), forward recovered to 0.0036, density mass 0.99967.
 
 **179 tests green**: `test_core.py` 87, `test_fixes.py` 47, `test_surface.py` 45.
+
+## Session B (2026-09-08) -- Heston cf and the Fourier pricers
+
+**B1.** `models/heston.py`. The Albrecher form `g = (a-d)/(a+d)`, never the
+reciprocal. Demonstrated instead of asserted: `char_func_trap` keeps the broken
+version so the suite can measure it. At u = 4 the max/median step across a
+4000-point tau grid is **5.2** for the shipped form and **5652** for the
+reciprocal -- a real branch-cut crossing, not folklore.
+
+Documented limitation: as `xi -> 0`, `kappa*theta/xi^2` and `(a-d)/xi^2` both
+diverge while their combination stays finite, so accuracy against the exact
+Black-Scholes cf degrades -- 1e-10 at `xi = 1e-4`, 3.5e-06 at `xi = 1e-6`. Never
+an issue at calibration-realistic `xi`, but the degeneracy test has to run at a
+moderate one.
+
+**B2.** `pricing/fourier.py`. Lewis and Carr-Madan, sharing only the cf. Both
+match the exact Black-Scholes cf to ~1e-15 and each other to 1e-8 on Heston.
+
+Two findings worth keeping:
+
+- **`leggauss` is O(n^2) and cost 8.4 SECONDS at n = 4000.** A calibrator prices
+  a surface per objective evaluation, thousands of times, so a single large rule
+  is unusable. Quadrature is now composite -- one cached 64-point rule over as
+  many panels as needed -- and resolution is linear in the panel count.
+- **No fixed `(u_max, n_nodes)` serves the whole surface.** The transform is
+  still 2.9e-06 at u = 200 for a 1-day option but 7e-21 for a 1-year one, and
+  short maturities need ~10 nodes per unit of u to resolve the decay cliff.
+  Under-provisioning cost 1.7e-07 where 7.3e-15 was available. Both are now
+  derived from the cf itself.
+
+Carr-Madan turns out to be the better-conditioned of the two (2.6e-16 vs Lewis's
+1.6e-07 at one day under identical automatic settings), because its damping
+denominator decays like `1/v^2` on top of the transform's own decay. The module
+docstring said the opposite before this was measured.
+
+### Phase 1 baseline -- the number Phase 2 has to beat
+
+| tau | 1d | 21d | 252d | 504d |
+|---|---|---|---|---|
+| Heston ATM skew | -0.4367 | -0.4164 | -0.2069 | -0.1340 |
+
+Fitted **H = 0.483 +/- 0.015**; the short end alone gives **H = 0.495** -- the
+classical one half, as theory requires, since a diffusion has a finite ATM skew
+limit as `tau -> 0`. A market at `H = 0.12` would carry a 1-day skew near
+**1.426** against Heston's **0.437**, a 3.3x shortfall. See
+`docs/phase1_baseline.md` and `captures/heston_skew_baseline.png`.
+
+**228 tests green**: core 87, fixes 47, surface 45, models 20, pricing 29.
 
 ## Still open
 
