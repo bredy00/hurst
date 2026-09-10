@@ -36,11 +36,18 @@ _erf = np.vectorize(math.erf, otypes=[float])
 
 
 def norm_pdf(x):
+    # Scalar fast path: np.vectorize carries a fixed per-CALL overhead that
+    # dominates when the argument is a single number, and the implied-vol solver
+    # calls this one value at a time thousands of times per calibration.
+    if isinstance(x, (int, float)):
+        return math.exp(-0.5 * x * x) / SQRT_2PI
     x = np.asarray(x, dtype=float)
     return np.exp(-0.5 * x * x) / SQRT_2PI
 
 
 def norm_cdf(x):
+    if isinstance(x, (int, float)):
+        return 0.5 * (1.0 + math.erf(x / SQRT_2))
     x = np.asarray(x, dtype=float)
     return 0.5 * (1.0 + _erf(x / SQRT_2))
 
