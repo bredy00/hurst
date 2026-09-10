@@ -48,7 +48,18 @@ def fbm(n, H, rng):
     g = 0.5 * (np.abs(k + 1) ** (2 * H) - 2 * np.abs(k) ** (2 * H)
                + np.abs(k - 1) ** (2 * H))
     c = np.concatenate([g, [0.0], g[:0:-1]])
-    lam = np.maximum(np.fft.fft(c).real, 0.0)
+    lam = np.fft.fft(c).real
+    # Shevchenko (2014) Sec 6: for fBm the circulant embedding is positive
+    # definite, so every eigenvalue is positive and the square root is real.
+    # That holds across our working range (min eigenvalue +2.8e-05 at H=0.10)
+    # but FAILS as H -> 1: at H = 0.99 the minimum is -0.76. Flooring at zero
+    # silently returns a path that is not fBm, so refuse instead.
+    if lam.min() < -1e-8 * max(abs(lam).max(), 1.0):
+        raise ValueError(
+            f"circulant embedding not positive definite at H={H} "
+            f"(min eigenvalue {lam.min():.3e}); Wood-Chan needs its "
+            f"approximate fallback here")
+    lam = np.maximum(lam, 0.0)
     m = len(c)
     z = rng.normal(size=m) + 1j * rng.normal(size=m)
     return np.cumsum(np.fft.fft(np.sqrt(lam / (2 * m)) * z).real[:n])
