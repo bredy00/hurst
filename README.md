@@ -12,12 +12,15 @@ fit/svi.py                            raw SVI slice fitting, scipy-free
 sources/replay.py                     JSON record / replay of a chain snapshot
 models/heston.py                      Heston cf (Albrecher branch) + MC
 pricing/fourier.py                    Lewis + Carr-Madan, adaptive composite quadrature
+calibrate/objective.py                vega-weighted implied-vol loss
+calibrate/fit.py                      Levenberg-Marquardt, generic over the model
 capture_v2.py / capture_v3.py         stand-in feeds + comparison images
 test_core.py                          87 checks   (the maths)
 test_fixes.py                         47 checks   (IBKR runtime behaviour)
 test_surface.py                       45 checks   (audit, SVI, density, replay)
 test_models.py                        20 checks   (Heston cf)
 test_pricing.py                       29 checks   (Fourier pricers)
+test_calibrate.py                     46 checks   (objective, LM, identifiability)
 docs/superpowers/plans/               the six-session rough Heston plan
 captures/                             frames, GIFs, comparisons, snapshot.json
 .venv/                                python 3.12.3
@@ -29,7 +32,9 @@ captures/                             frames, GIFs, comparisons, snapshot.json
 .venv/Scripts/python.exe test_surface.py  # 45 passed
 .venv/Scripts/python.exe test_models.py   # 20 passed
 .venv/Scripts/python.exe test_pricing.py  # 29 passed
-.venv/Scripts/python.exe capture_heston.py # Phase 1 skew baseline
+.venv/Scripts/python.exe test_calibrate.py # 46 passed
+.venv/Scripts/python.exe capture_heston.py      # Heston's own skew term structure
+.venv/Scripts/python.exe capture_calibration.py # Phase 1 baseline vs a rough surface
 .venv/Scripts/python.exe capture_v3.py    # re-render + end-to-end validation
 ```
 
@@ -191,6 +196,88 @@ limit as `tau -> 0`. A market at `H = 0.12` would carry a 1-day skew near
 `docs/phase1_baseline.md` and `captures/heston_skew_baseline.png`.
 
 **228 tests green**: core 87, fixes 47, surface 45, models 20, pricing 29.
+
+## Session C (2026-09-10) -- calibration
+
+**C1** `calibrate/objective.py`. The loss is in **implied vol**, not price:
+price errors are dominated by at-the-money contracts worth a hundred times a
+wing contract, so a price-space fit is nearly blind to the skew. Weights are
+`volsurf_core.quote_weight` -- the same inverse-variance notion the live surface
+already uses, not a second one invented for the fit.
+
+**C2** `calibrate/fit.py`. Levenberg-Marquardt with Marquardt (diag) damping,
+forward-difference Jacobian, multi-start, and a **time budget**. Generic over the
+model: a `Transform` plus a characteristic-function factory is all it needs, so
+Session E's rough Heston is calibrated by this identical code.
+
+On clean data every parameter comes back to **0.000%**.
+
+### Four bugs, all caught by a test or a crash
+
+- **`math.tanh(40)` is exactly 1.0.** A bare tanh map for rho could hand the
+  model `rho = 1`, where `sqrt(1 - rho^2) = 0` and the simulator degenerates.
+- **A log map runs away.** Fitting a rough surface -- a shape Heston cannot make
+  -- pushed `kappa` outward until `math.exp` overflowed past x ~ 709. Worse, well
+  before that the characteristic function stops decaying, `_auto_u_max` runs to
+  its cap, and one objective evaluation needs half a million quadrature nodes:
+  the fit does not fail, it just never finishes. Both parameters now go through
+  a bounded logistic.
+- **The synthetic rough surface was nonsense.** A smile written as
+  `sigma = atm + skew*k + 6*k^2` is fine at 7 days where the +/-3 sigma band is
+  `|k| <= 0.06`, and produces a **265% implied vol** at one year where the same
+  band reaches `|k| = 0.62`. Quote weights spanned 2.4e12 and the calibrator
+  correctly fled to the parameter bounds. Curvature is now specified in sigma
+  units, which is dimensionless and stays put.
+- **A factor of `atm` in the skew scaling** gave a 7-day skew of -0.18 instead
+  of -1.30. `d(sigma)/dk = a1/sqrt(tau)`, so `a1 = skew*sqrt(tau)`; the atm
+  factors cancel.
+
+Two performance findings: the implied-vol inversion was **half** the cost of an
+objective evaluation (1.8 ms per strike, nearly all numpy call overhead), now
+vectorised across the strip; and `Re[e^{-iuk} z]` is computed with cos/sin on
+real arrays rather than a complex exponential that computes `exp(0) = 1` and
+discards it. Together **470 ms -> 225 ms** per evaluation.
+
+### What is actually identifiable
+
+Under 0.5 vol point quote noise the surface is still recovered to about the noise
+level while the parameters are not:
+
+| | v0 | kappa | theta | xi | rho |
+|---|---|---|---|---|---|
+| spread across noise seeds | 2.1% | **37.7%** | 17.3% | 13.4% | 2.1% |
+
+`v0` and `rho` are pinned by the short-end level and the skew. `kappa` is not,
+and the mechanism is provable rather than asserted: extending the maturities from
+one year to three -- past the relaxation time `1/kappa = 0.5 y` -- tightens
+`theta` from 33.0% to 5.0%. You cannot read a long-run level off a surface that
+stops before the process has relaxed. The plan's original "recover to 5% under
+noise" was simply not achievable, and asserting it would have been asserting
+something false.
+
+### Phase 1 baseline -- Heston fitted to a rough surface
+
+Overall RMSE **5.21 vol points**, and the error is **U-shaped**: Heston sacrifices
+both ends to fit the middle.
+
+| tau | 1d | 2d | 7d | 30d | 90d | 365d |
+|---|---|---|---|---|---|---|
+| rmse (vp) | **7.52** | 6.93 | 4.95 | 2.76 | 4.05 | **5.42** |
+| market skew | -2.723 | -2.093 | -1.300 | -0.748 | -0.493 | -0.289 |
+| Heston skew | -1.575 | -1.591 | -1.568 | -0.996 | -0.576 | -0.299 |
+| Heston / market | **0.58** | 0.76 | 1.21 | 1.33 | 1.17 | 1.03 |
+
+At one day Heston delivers **58%** of the market's ATM skew, and its skew goes
+flat below about a week while the market keeps climbing. Fitted `xi = 2.02` with
+Feller violated by -3.58 -- the model visibly contorted trying. **H from the
+market 0.120, from the fitted Heston 0.205**; it cannot get below roughly 0.2.
+
+Note the short end is not optional: a grid starting at 7 days lets Heston fit a
+`tau^-0.4` decay and look adequate. See `docs/phase1_baseline.md` and
+`captures/heston_vs_rough.png`.
+
+**274 tests green**: core 87, fixes 47, surface 45, models 20, pricing 29,
+calibrate 46.
 
 ## Still open
 
