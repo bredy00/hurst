@@ -14,8 +14,7 @@ import sys
 
 import numpy as np
 
-import volsurf_core as vc
-from models.heston import HestonParams, char_func, char_func_trap, mc_call, simulate
+from models.heston import HestonParams, char_func, char_func_trap, simulate
 
 
 PASS, FAIL = [], []

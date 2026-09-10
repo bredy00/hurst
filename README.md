@@ -71,7 +71,7 @@ its full timeout. Probably the firewall. 250 ms is used.
 So `volsurf_core` has no scipy at all — `norm_pdf`/`norm_cdf` are three lines each
 (checked against scipy to 1e-15 in `test_core.py`) and implied vol uses Newton on
 vega with a bisection guard instead of `brentq`. matplotlib is imported lazily
-inside the plot function. **9.6 s -> 1.97 s.**
+inside the plot function. **9.6 s -> 0.76 s** (measured 2026-09-10; an earlier 1.97 s figure predated the 250 ms probe timeout).
 
 **B. The greeks are kept.** IBKR sends delta/gamma/vega/theta and the model price
 on every `tickOptionComputation`; v1 and v2 both bound them and threw them away,

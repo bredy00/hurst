@@ -24,8 +24,8 @@ import matplotlib.pyplot as plt
 
 import volsurf_core as vc
 import pricing.fourier as fo
-from models.heston import HestonParams, char_func
-from calibrate.objective import MarketSurface, model_ivs, per_expiry_report
+from models.heston import HestonParams
+from calibrate.objective import MarketSurface, per_expiry_report
 from calibrate.fit import DEFAULT_STARTS, calibrate_heston, heston_cf_factory
 
 OUT = pathlib.Path(__file__).parent / "captures"

@@ -20,8 +20,8 @@ import numpy as np
 import volsurf_core as vc
 import pricing.fourier as fo
 from models.heston import HestonParams, char_func
-from calibrate.objective import (MarketSurface, loss, model_ivs,
-                                 per_expiry_report, residuals, rmse_vol)
+from calibrate.objective import (MarketSurface, loss, per_expiry_report,
+                                 residuals, rmse_vol)
 from calibrate.fit import (DEFAULT_STARTS, HESTON_TRANSFORM, calibrate_heston,
                            heston_cf_factory, levenberg_marquardt)
 

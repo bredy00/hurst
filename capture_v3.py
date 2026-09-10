@@ -15,8 +15,6 @@ machinery is doing what it claims.
 import datetime
 import math
 import pathlib
-import sys
-import threading
 import time
 import types
 

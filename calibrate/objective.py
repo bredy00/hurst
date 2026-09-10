@@ -14,7 +14,6 @@ vol, 1/(half_spread/vega)^2 -- so this is the same notion of quote quality the
 live surface already uses, not a second one invented for the fit.
 """
 
-import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -40,7 +39,7 @@ class MarketSurface:
     k: np.ndarray
     iv: np.ndarray
     weight: np.ndarray
-    _groups: list = field(default=None, repr=False)
+    by_expiry: list = field(default=None, repr=False)
 
     def __post_init__(self):
         self.tau = np.asarray(self.tau, dtype=float)
@@ -52,15 +51,15 @@ class MarketSurface:
             raise ValueError("tau, k, iv and weight must be the same length")
         # One characteristic function evaluation serves a whole expiry, so group
         # once here rather than rediscovering the structure on every call.
-        self._groups = [(float(t), np.where(self.tau == t)[0])
-                        for t in np.unique(self.tau)]
+        self.by_expiry = [(float(t), np.where(self.tau == t)[0])
+                          for t in np.unique(self.tau)]
 
     def __len__(self):
         return len(self.tau)
 
     @property
     def n_expiries(self):
-        return len(self._groups)
+        return len(self.by_expiry)
 
     @classmethod
     def from_points(cls, points, ctxs):
@@ -86,7 +85,7 @@ def model_ivs(params, surface, cf_factory, pricer=fo.carr_madan_call,
     """
     out = np.full(len(surface), np.nan)
     failed = 0
-    for tau, idx in surface._groups:
+    for tau, idx in surface.by_expiry:
         cf = cf_factory(params, tau)
         ks = surface.k[idx]
         prices = np.atleast_1d(pricer(ks, tau, cf, tol=tol))
@@ -140,7 +139,7 @@ def per_expiry_report(params, surface, cf_factory, pricer=fo.carr_madan_call,
     """RMSE and worst error by expiry -- where the model is failing, not just how much."""
     mv, _ = model_ivs(params, surface, cf_factory, pricer, tol)
     rows = []
-    for tau, idx in surface._groups:
+    for tau, idx in surface.by_expiry:
         d = mv[idx] - surface.iv[idx]
         d = d[np.isfinite(d)]
         if d.size:

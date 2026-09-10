@@ -3,12 +3,13 @@ Levenberg-Marquardt calibration, numpy only.
 
 Two design choices worth stating.
 
-**Unconstrained parameters.** The optimiser never sees v0, kappa, theta, xi or
-rho directly. It works on log(positive) and atanh(rho), so the bounds cannot be
-violated, no projection or penalty is needed, and the search directions are
-well scaled -- kappa ~ 2 and v0 ~ 0.04 differ by two orders of magnitude in the
-raw parameterisation, which is exactly the sort of thing that makes a Jacobian
-ill-conditioned.
+**Bounded, unconstrained parameters.** The optimiser never sees v0, kappa,
+theta, xi or rho directly. Each is the image of a logistic on a finite box, so
+the bounds cannot be violated, no projection or penalty is needed, and the search
+directions are well scaled -- kappa ~ 2 and v0 ~ 0.04 differ by two orders of
+magnitude in the raw parameterisation, which is exactly the sort of thing that
+makes a Jacobian ill-conditioned. See BOUNDS for why the box is finite rather
+than a bare log or tanh map.
 
 **Generic over the model.** Nothing here knows what Heston is. A model supplies
 a characteristic-function factory and a `Transform`, and the same driver fits it.
@@ -33,14 +34,15 @@ class Transform:
     from_x: callable      # unconstrained vector -> params
 
 
-# tanh SATURATES: math.tanh(40) is exactly 1.0 in float64, so a bare tanh map
-# can hand the model rho = +-1, which is outside its domain -- sqrt(1 - rho^2)
-# is then zero and the simulator degenerates. Scaling by a cap strictly below 1
-# makes that unreachable however far the optimiser wanders. The inverse divides
-# by the same cap so the round trip stays exact.
-# Every parameter is mapped through a bounded logistic rather than a bare log.
+# Every parameter is mapped through a bounded logistic. The two obvious
+# alternatives were both tried and both fail.
 #
-# A log map is unbounded above, and Levenberg-Marquardt does run away with it:
+# A bare tanh for rho SATURATES: math.tanh(40) is exactly 1.0 in float64, so the
+# optimiser can hand the model rho = +-1, which is outside its domain -- there
+# sqrt(1 - rho^2) is zero and the simulator degenerates.
+#
+# A bare log for the positive parameters is unbounded above, and Levenberg-
+# Marquardt does run away with it:
 # asked to fit a ROUGH surface -- a shape Heston structurally cannot make at the
 # short end -- the optimiser pushes kappa outward chasing a fit that does not
 # exist. Two things then break. math.exp overflows past x ~ 709, which is merely
