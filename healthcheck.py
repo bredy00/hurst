@@ -710,7 +710,7 @@ HISTORY = ROOT / "captures" / "healthcheck_history.jsonl"
 # a flattening objective; the rolling RMSE target is for the clean-data fit.
 TREND_RULES = {
     "Jacobian condition number at the solution": {"median_max": 100.0, "spike": 1e4},
-    "fitted RMSE on clean data": {"mean_max": 5e-9 * 100},   # vol points
+    "fitted RMSE on clean data": {"mean_max": 5e-9},   # recorded in vol points already
 }
 
 
