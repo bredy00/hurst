@@ -124,29 +124,80 @@ def test_little_heston_trap():
 
 
 def test_bs_degeneracy():
+    """
+    xi -> 0. The cf must tend to Black-Scholes at the rate xi^2 -- that is the
+    genuine vol-of-vol effect -- all the way down to the floating-point floor.
+    The literal textbook evaluation cannot do this (cancellation in
+    kappa*theta/xi^2), which is measured on `char_func_naive` rather than stated.
+    """
     print("\nB1 -- xi -> 0 degenerates to Black-Scholes")
+    import models.heston as mh
     sigma, tau = 0.20, 0.5
     exact = bs_cf(sigma, tau)
     u = np.linspace(0.0, 30.0, 300)
 
-    # xi = 1e-4 is the sweet spot: small enough that the model is effectively
-    # Black-Scholes, large enough that 1/xi^2 has not eaten the precision.
-    p = HestonParams(v0=sigma ** 2, kappa=2.0, theta=sigma ** 2, xi=1e-4, rho=0.0)
-    err = float(np.max(np.abs(char_func(u, tau, p) - exact(u))))
-    check("cf matches Black-Scholes at xi = 1e-4", err < 1e-8, f"max |diff| {err:.2e}")
-
-    # And document the cancellation rather than pretending it is not there
-    errs = {}
-    for xi in (1e-3, 1e-4, 1e-5, 1e-6):
+    errs, naive = {}, {}
+    for xi in (1e-3, 1e-4, 1e-5, 1e-6, 1e-8, 1e-10, 1e-12):
         q = HestonParams(v0=sigma ** 2, kappa=2.0, theta=sigma ** 2, xi=xi, rho=0.0)
         errs[xi] = float(np.max(np.abs(char_func(u, tau, q) - exact(u))))
-    print("      xi -> 0 cancellation: " +
-          ", ".join(f"{x:.0e}:{e:.1e}" for x, e in errs.items()))
-    check("precision degrades as xi -> 0 (known, documented)",
-          errs[1e-6] > errs[1e-4],
-          "cancellation in kappa*theta/xi^2 and (a-d)/xi^2")
-    check("...but is negligible at calibration-realistic xi",
-          errs[1e-3] < 1e-6)
+        naive[xi] = float(np.max(np.abs(mh.char_func_naive(u, tau, q) - exact(u))))
+    print("      shipped: " + ", ".join(f"{x:.0e}:{e:.1e}" for x, e in errs.items()))
+    print("      naive  : " + ", ".join(f"{x:.0e}:{e:.1e}" for x, e in naive.items()))
+
+    check("cf matches Black-Scholes at xi = 1e-4", errs[1e-4] < 1e-8,
+          f"max |diff| {errs[1e-4]:.2e}")
+    # Between 1e-4 and 1e-6 the remaining difference is the MODEL's O(xi^2)
+    # vol-of-vol effect, so it must shrink by 1e4, not plateau.
+    ratio = errs[1e-6] / errs[1e-4]
+    check("the deviation from BS scales as xi^2 (it is model, not error)",
+          0.5e-4 < ratio < 2e-4, f"err(1e-6)/err(1e-4) = {ratio:.2e}, expect 1e-4")
+    check("machine precision from xi = 1e-8 down to 1e-12",
+          max(errs[1e-8], errs[1e-10], errs[1e-12]) < 1e-14,
+          f"{errs[1e-8]:.1e}, {errs[1e-10]:.1e}, {errs[1e-12]:.1e}")
+    check("the literal evaluation DOES lose precision (measured, not described)",
+          naive[1e-6] > 1e-6 and naive[1e-10] > 0.1,
+          f"naive {naive[1e-6]:.1e} at 1e-6, {naive[1e-10]:.1e} at 1e-10")
+    # Where the naive form is healthy the two must be the same function. Compare
+    # the cfs directly rather than two maxima -- at xi = 1e-3 the naive form
+    # already carries ~1e-10 of cancellation, which is the whole point.
+    uu = np.linspace(0.0, 60.0, 300) - 1.5j
+    same = max(float(np.max(np.abs(char_func(uu, t, q) - mh.char_func_naive(uu, t, q))))
+               for q in (HestonParams(0.04, 2.0, 0.045, 0.5, -0.7),
+                         HestonParams(0.09, 1.2, 0.06, 0.05, -0.5))
+               for t in (1 / 365, 0.5, 2.0))
+    check("...and agrees with the shipped form where it is healthy",
+          same < 1e-12, f"max |diff| {same:.1e} at xi = 0.5 and 0.05")
+
+    # The two branches of the small-xi switch must agree across the switch
+    saved = mh.XI_TAYLOR
+    worst = 0.0
+    try:
+        for xi in (1e-3, 1e-4, 1e-5):
+            q = HestonParams(0.04, 2.0, 0.045, xi, -0.7)
+            for t in (1 / 365, 0.5, 2.0):
+                uu = np.linspace(0.0, 60.0, 300) - 1.5j
+                mh.XI_TAYLOR = 0.0
+                a = char_func(uu, t, q)
+                mh.XI_TAYLOR = 1.0
+                b = char_func(uu, t, q)
+                worst = max(worst, float(np.max(np.abs(a - b))))
+    finally:
+        mh.XI_TAYLOR = saved
+    check("Taylor branch and log1p branch agree across the switch",
+          worst < 1e-14, f"max |diff| {worst:.2e} over xi = 1e-3, 1e-4, 1e-5")
+
+    # xi = 0 exactly: the deterministic-variance limit, rho and theta irrelevant
+    q0 = HestonParams(0.04, 2.0, 0.09, 0.0, -0.7)
+    V = 0.04 * (1 - math.exp(-2.0 * 0.7)) / 2.0 + 0.09 * (0.7 - (1 - math.exp(-2.0 * 0.7)) / 2.0)
+    lim = np.exp(-0.5 * (u * u + 1j * u) * V)
+    e0 = float(np.max(np.abs(char_func(u, 0.7, q0) - lim)))
+    check("xi = 0 exactly returns the deterministic-variance cf", e0 < 1e-15,
+          f"{e0:.1e}")
+    # and xi = 1e-9 with rho != 0 is within its genuine O(xi) term of that limit
+    q9 = HestonParams(0.04, 2.0, 0.09, 1e-9, -0.7)
+    e9 = float(np.max(np.abs(char_func(u, 0.7, q9) - lim)))
+    check("xi = 1e-9, rho = -0.7 sits within O(xi) of the limit", e9 < 1e-7,
+          f"{e9:.1e}")
 
 
 def test_monte_carlo():

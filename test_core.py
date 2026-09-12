@@ -485,6 +485,119 @@ def test_finite_differences():
           np.nanmin(dbad) < 0, f"min {np.nanmin(dbad):.4f}")
 
 
+def test_second_derivative_on_real_grids():
+    """
+    fd_second_poly is the fix for the documented order loss on non-uniform
+    grids. It must be exact for quartics on ANY grid, hold second order on a
+    kinked grid where the 3-point stencil is first order, and the density
+    built from it must beat the old one on a uniform grid too.
+    """
+    print("\n-- second derivative on real strike grids (Fornberg 5-point)")
+    rng = np.random.default_rng(0)
+    x = np.sort(rng.uniform(0.5, 3.0, 60))
+    y = 1 + 2 * x - 0.5 * x ** 2 + 0.25 * x ** 3 - 0.1 * x ** 4
+    d_exact = -1.0 + 1.5 * x - 1.2 * x ** 2
+    err = float(np.nanmax(np.abs(c.fd_second_poly(x, y)[1:-1] - d_exact[1:-1])))
+    check("5-point stencil is exact on a quartic over a RANDOM grid", err < 1e-8,
+          f"max err {err:.2e}")
+    check("...and the 3-point stencil is not",
+          float(np.nanmax(np.abs(c.fd_second(x, y)[1:-1] - d_exact[1:-1]))) > 1e-3)
+
+    # SPY-like grid: $1 spacing then $5 spacing. Order measured by doubling.
+    def kink(n):
+        a = np.arange(0.40, 1.0001, 0.6 / (n * 0.7))
+        b = np.arange(a[-1] + 5 * (a[1] - a[0]), 1.8, 5 * (a[1] - a[0]))
+        return np.concatenate([a, b])
+
+    def dens(K):
+        sig, tau = 0.25, 0.25
+        return (np.exp(-(np.log(K) + 0.5 * sig * sig * tau) ** 2 / (2 * sig * sig * tau))
+                / (K * sig * math.sqrt(2 * math.pi * tau)))
+
+    def err_of(f, n):
+        K = kink(n)
+        C = np.array([float(c.bs_price(1.0, k, 0.25, 0.25, 1.0, 'C')) for k in K])
+        d = f(K, C)
+        ok = np.isfinite(d)
+        return float(np.max(np.abs(d[ok] - dens(K)[ok])) / dens(K).max())
+
+    e5 = [err_of(c.fd_second_poly, n) for n in (101, 201, 401)]
+    e3 = [err_of(c.fd_second, n) for n in (101, 201, 401)]
+    o5 = math.log2(e5[0] / e5[2]) / 2
+    o3 = math.log2(e3[0] / e3[2]) / 2
+    check("5-point holds at least second order across a $1/$5 kink", o5 > 2.0,
+          f"observed order {o5:.2f}")
+    check("3-point drops to first order there (the documented loss)", o3 < 1.5,
+          f"observed order {o3:.2f}")
+    check("5-point is at least 10x more accurate at every resolution",
+          all(a < 0.1 * b for a, b in zip(e5, e3)),
+          f"{e5[0]:.1e}/{e3[0]:.1e} at n=101")
+
+    # Uniform grid: the fast path must agree with the general one, and the
+    # density must be better than the 3-point version was.
+    K = np.linspace(300.0, 1400.0, 1401)
+    C = np.array([float(c.bs_price(650.0, k, 0.2, 0.25, 0.995, 'C')) for k in K])
+    Kb, q5 = c.breeden_litzenberger(K, C, 0.995)
+    _, q3 = c.breeden_litzenberger(K, C, 0.995, stencil="3pt")
+    _, d2 = c.d1_d2(650.0, Kb, 0.2, 0.25)
+    an = c.norm_pdf(d2) / (Kb * 0.2 * 0.5)
+    m = np.isfinite(q5)
+    e5u = float(np.max(np.abs(q5[m] - an[m])))
+    e3u = float(np.max(np.abs(q3[m] - an[m])))
+    check("uniform-grid density: 5-point beats 3-point by 1000x", e5u < 1e-3 * e3u,
+          f"{e5u:.1e} vs {e3u:.1e}")
+    slow = c.fd_second_poly(K + 0.0, C)
+    Kj = K.copy()
+    Kj[1] += 1e-9          # break exact uniformity to force the general path
+    gen = c.fd_second_poly(Kj, C)
+    ok = np.isfinite(slow) & np.isfinite(gen)
+    check("uniform fast path agrees with the general Fornberg path",
+          float(np.max(np.abs(slow[ok] - gen[ok]))) < 1e-6 * float(np.max(np.abs(slow[ok]))))
+
+    # Endpoint convention preserved
+    check("endpoints are NaN, as documented",
+          not np.isfinite(q5[0]) and not np.isfinite(q5[-1]))
+
+
+def test_density_for_sampling():
+    """
+    The floored, renormalised copy for downstream sampling. It must never touch
+    the raw density (which is the diagnostic), must be >= eps everywhere, must
+    integrate to exactly one, and must report what it removed.
+    """
+    print("\n-- density_for_sampling")
+    K = np.linspace(300.0, 1400.0, 1401)
+    C = np.array([float(c.bs_price(650.0, k, 0.2, 0.25, 0.995, 'C')) for k in K])
+    Kb, q = c.breeden_litzenberger(K, C, 0.995)
+    raw_min = float(np.nanmin(q))
+    Ks, qs, info = c.density_for_sampling(Kb, q)
+    check("raw density is untouched", float(np.nanmin(q)) == raw_min)
+    check("sampling density is >= machine epsilon everywhere",
+          float(qs.min()) >= np.finfo(float).eps, f"min {qs.min():.3e}")
+    check("sampling density integrates to one to 1e-14",
+          abs(float(np.trapezoid(qs, Ks)) - 1.0) < 1e-14,
+          f"{float(np.trapezoid(qs, Ks)):.16f}")
+    check("no NaN survives", np.all(np.isfinite(qs)))
+    check("reports the negative mass it removed and the renormalisation",
+          all(k in info for k in ("negative_mass", "renorm_factor", "n_floored", "raw_mass")),
+          f"{info}")
+    check("on a clean slice the correction is at the noise floor",
+          abs(info['renorm_factor'] - 1.0) < 1e-9 and abs(info['negative_mass']) < 1e-9,
+          f"renorm {info['renorm_factor']-1:+.1e}, negative mass {info['negative_mass']:.1e}")
+
+    # A dented (arbitrage) slice: the raw density goes negative, the sampling
+    # copy hides it -- and SAYS so.
+    bad = C.copy()
+    bad[700] += 0.5
+    _, qb = c.breeden_litzenberger(K, bad, 0.995)
+    _, qbs, ib = c.density_for_sampling(K, qb)
+    check("arbitrage slice: raw density negative, sampling copy is not",
+          float(np.nanmin(qb)) < 0 and float(qbs.min()) > 0)
+    check("...and the removed negative mass is reported as material",
+          ib['negative_mass'] < -1e-4 and ib['n_floored'] > 0,
+          f"negative mass {ib['negative_mass']:.4f} over {ib['n_floored']} points")
+
+
 if __name__ == "__main__":
     print("=" * 74)
     print("volsurf_core -- maths verification")
@@ -501,6 +614,8 @@ if __name__ == "__main__":
     test_local_skew_window()
     test_structure_function()
     test_finite_differences()
+    test_second_derivative_on_real_grids()
+    test_density_for_sampling()
     print("\n" + "=" * 74)
     print(f"{len(PASS)} passed, {len(FAIL)} failed")
     for f in FAIL:

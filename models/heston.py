@@ -46,6 +46,22 @@ class HestonParams:
                 and self.xi > 0 and abs(self.rho) < 1)
 
 
+XI_TAYLOR = 1e-4     # below this vol-of-vol the log term uses its Taylor series
+
+
+def _clog1p(z):
+    """
+    log(1 + z) for complex z, accurate when |z| is small.
+
+    numpy's complex log1p is NOT: its ufunc loop computes log(hypot(1+x, y)),
+    which throws away every digit of a small z. The real-part identity
+    log|1+z| = 0.5 log1p(2x + x^2 + y^2) keeps them, and atan2 handles the angle.
+    """
+    z = np.asarray(z, dtype=complex)
+    x, y = z.real, z.imag
+    return 0.5 * np.log1p(2.0 * x + x * x + y * y) + 1j * np.arctan2(y, 1.0 + x)
+
+
 def char_func(u, tau, p):
     """
     phi(u) = E[ exp(i u X_tau) ],  X = log(S_tau / F).
@@ -69,13 +85,69 @@ def char_func(u, tau, p):
     below keeps the broken version so the test suite can show this rather than
     assert it on authority.
 
-    KNOWN LIMITATION -- small xi. Both kappa*theta/xi^2 and (a-d)/xi^2 diverge as
-    xi -> 0 while their combination stays finite, so the expression loses
-    precision by cancellation. Against the exact Black-Scholes characteristic
-    function the error is ~1e-10 at xi = 1e-4, 2e-07 at xi = 1e-5 and 3.5e-06 at
-    xi = 1e-6. This never bites at calibration-realistic parameters (xi ~ 0.1 to
-    1.0) but it does mean the xi -> 0 degeneracy test has to be run at a moderate
-    xi, not an arbitrarily tiny one.
+    SMALL xi, and why the formulas above are not evaluated literally. Written as
+    printed, kappa*theta/xi^2 and (a-d)/xi^2 both diverge as xi -> 0 while their
+    combination stays finite, and the cancellation costs precision: measured
+    against the exact Black-Scholes cf the literal form is off by 5.9e-09 at
+    xi = 1e-4, 3.4e-05 at 1e-6 and is 100% wrong by 1e-10 (`char_func_naive`,
+    kept below for the health check). Two identities remove it entirely:
+
+        (a - d)(a + d) = -xi^2 (u^2 + iu)   =>   (a-d)/xi^2 = -(u^2+iu)/(a+d)
+
+    which is exact and has no cancellation, and for the log term
+
+        log((1 - g e^{-d tau})/(1 - g)) = log1p( g (1 - e^{-d tau}) / (1 - g) )
+
+    a single log1p of an O(xi^2) quantity, with 1 - e^{-d tau} from expm1. Its
+    Taylor series in xi^2 -- log1p(z)/xi^2 = zeta (1 - z/2 + z^2/3 - z^3/4),
+    z = xi^2 zeta -- is used below XI_TAYLOR = 1e-4, where four terms are exact
+    to machine precision; above it an accurate complex log1p is used. The two
+    branches agree to 3e-16 across the switch, and the result matches the exact
+    Black-Scholes cf to 2e-16 at xi = 1e-8, 1e-10 and 1e-12. At xi = 0 exactly the
+    deterministic-variance limit is returned.
+    """
+    u = np.asarray(u, dtype=complex)
+    v0, kappa, theta, xi, rho = p.as_tuple()
+
+    iu = 1j * u
+    b = u * u + iu                              # u^2 + i u
+
+    if xi == 0.0:
+        # dv = kappa (theta - v) dt exactly: integrated variance is deterministic
+        relax = -math.expm1(-kappa * tau) / kappa if kappa > 0 else tau
+        V = v0 * relax + theta * (tau - relax)
+        return np.exp(-0.5 * b * V)
+
+    a = kappa - rho * xi * iu
+    d = np.sqrt(a * a + (xi * xi) * b)
+
+    apd = a + d
+    # a + d = 0 only in degenerate corners; fall back to the other root there
+    bad = np.abs(apd) < 1e-300
+    if np.any(bad):
+        d = np.where(bad, -d, d)
+        apd = a + d
+
+    amd_xi2 = -b / apd                          # (a - d) / xi^2, exactly
+    gam = amd_xi2 / apd                         # g / xi^2
+    one_m_e = -np.expm1(-d * tau)               # 1 - e^{-d tau}
+    zeta = gam * one_m_e / (1.0 - (xi * xi) * gam)
+    z = (xi * xi) * zeta
+    if xi < XI_TAYLOR:
+        log_term_xi2 = zeta * (1.0 - z / 2.0 + z * z / 3.0 - z * z * z / 4.0)
+    else:
+        log_term_xi2 = _clog1p(z) / (xi * xi)
+
+    C = kappa * theta * (amd_xi2 * tau - 2.0 * log_term_xi2)
+    D = amd_xi2 * one_m_e / (1.0 - (xi * xi) * gam * (1.0 - one_m_e))
+    return np.exp(C + D * v0)
+
+
+def char_func_naive(u, tau, p):
+    """
+    The literal textbook evaluation, kept ONLY so the cancellation as xi -> 0 can
+    be measured rather than described. Identical to `char_func` above 1e-3 or
+    so; do not price with it.
     """
     u = np.asarray(u, dtype=complex)
     v0, kappa, theta, xi, rho = p.as_tuple()
@@ -85,7 +157,6 @@ def char_func(u, tau, p):
     d = np.sqrt(a * a + (xi * xi) * (u * u + iu))
 
     denom = a + d
-    # a + d = 0 only in degenerate corners; fall back to the other root there
     bad = np.abs(denom) < 1e-300
     if np.any(bad):
         d = np.where(bad, -d, d)
@@ -120,6 +191,56 @@ def char_func_trap(u, tau, p):
                                        - 2.0 * np.log((1.0 - g * edt) / (1.0 - g)))
     D = ((a + d) / (xi * xi)) * (1.0 - edt) / (1.0 - g * edt)
     return np.exp(C + D * v0)
+
+
+def variance_swap_rate(p, tau):
+    """
+    Fair variance strike E[(1/tau) int_0^tau v_t dt] under Heston:
+
+        theta + (v0 - theta) (1 - e^{-kappa tau}) / (kappa tau)
+
+    exact, because the variance drift is affine. Useful two ways: as a check on
+    a fit (the model's variance-swap curve must lie near the market's), and as
+    the cleanest external handle on kappa when the option surface cannot
+    determine it -- the curve's approach to theta is governed by kappa alone.
+    """
+    if p.kappa * tau < 1e-12:
+        return p.v0
+    relax = -math.expm1(-p.kappa * tau) / (p.kappa * tau)
+    return p.theta + (p.v0 - p.theta) * relax
+
+
+def kappa_from_variance_swap(v0, theta, tau, rate, lo=1e-4, hi=1e3):
+    """
+    Invert variance_swap_rate for kappa by bisection, given v0 and theta.
+
+    The rate is monotone in kappa whenever v0 != theta (it moves from v0 at
+    kappa = 0 towards theta as kappa grows), so the root is unique when it
+    exists. Returns None if `rate` is not between v0 and theta -- no kappa can
+    produce it, and inventing one would be worse than saying so. Feed the
+    result to `calibrate(..., prior={'kappa': k}, prior_weight=...)`.
+    """
+    if abs(v0 - theta) < 1e-14:
+        return None
+    if not (min(v0, theta) - 1e-14 <= rate <= max(v0, theta) + 1e-14):
+        return None
+
+    def f(k):
+        return variance_swap_rate(HestonParams(v0, k, theta, 1e-3, 0.0), tau) - rate
+
+    flo, fhi = f(lo), f(hi)
+    if flo * fhi > 0:
+        return lo if abs(flo) < abs(fhi) else hi
+    for _ in range(200):
+        mid = math.sqrt(lo * hi)
+        fm = f(mid)
+        if flo * fm <= 0:
+            hi, fhi = mid, fm
+        else:
+            lo, flo = mid, fm
+        if hi / lo < 1.0 + 1e-12:
+            break
+    return math.sqrt(lo * hi)
 
 
 def simulate(p, tau, n_paths=200_000, n_steps=250, seed=0, antithetic=True):

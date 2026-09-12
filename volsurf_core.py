@@ -504,19 +504,155 @@ def fd_second(x, y):
     return d
 
 
-def breeden_litzenberger(strikes, call_prices, df=1.0):
+def fd_weights(x0, xs, m):
+    """
+    Fornberg (1988) weights: d^m/dx^m at x0 of the polynomial through the nodes
+    xs, for ANY node placement. Returns w with f^(m)(x0) ~ sum_j w_j f(x_j).
+
+    Exact for polynomials up to degree len(xs) - 1, which is the point: five
+    nodes make the second derivative exact for quartics on any grid, so the
+    (h2 - h1) f-triple-prime term that costs the 3-point stencil an order on
+    non-uniform spacing simply is not there.
+    """
+    xs = np.asarray(xs, dtype=float)
+    n = len(xs)
+    c = np.zeros((n, m + 1))
+    c1, c4 = 1.0, xs[0] - x0
+    c[0, 0] = 1.0
+    for i in range(1, n):
+        mn = min(i, m)
+        c2, c5, c4 = 1.0, c4, xs[i] - x0
+        for j in range(i):
+            c3 = xs[i] - xs[j]
+            c2 *= c3
+            if j == i - 1:
+                for k in range(mn, 0, -1):
+                    c[i, k] = c1 * (k * c[i - 1, k - 1] - c5 * c[i - 1, k]) / c2
+                c[i, 0] = -c1 * c5 * c[i - 1, 0] / c2
+            for k in range(mn, 0, -1):
+                c[j, k] = (c4 * c[j, k] - k * c[j, k - 1]) / c3
+            c[j, 0] = c4 * c[j, 0] / c3
+        c1 = c2
+    return c[:, m]
+
+
+def fd_second_poly(x, y, width=5):
+    """
+    Second derivative from the local polynomial through `width` neighbouring
+    points (Fornberg weights). NaN at the two endpoints, like fd_second.
+
+    This is the fix for fd_second's order loss on non-uniform grids, and it was
+    chosen by measurement rather than argument (debug_fd_methods.py). Against the
+    exact lognormal density, observed convergence order of the max error:
+
+        grid                       3-pt   mapped 3-pt   log-map   5-pt poly
+        smooth stretch             2.00      2.00         1.99       3.99
+        geometric                  2.00      2.00         2.00       3.98
+        $1 / $5 kink (SPY-like)    1.07      0.01         0.87       3.06
+        random spacing             0.84     -0.12         0.84       2.76
+
+    The coordinate-mapping idea -- differentiate in an index coordinate where the
+    grid is uniform and chain-rule back -- is second order only when the grid
+    function K(x) is itself smooth; at a kink its numerically differenced metric
+    K'' is O(1) wrong and the method does not converge at all (44% error at every
+    resolution). On smooth grids the plain 3-point stencil is already O(h^2)
+    because h2 - h1 is O(h^2) there. The local polynomial needs no assumption
+    about the grid and is the only one of the four that holds second order on
+    the grids that actually cause the problem.
+
+    Uniform grids take a vectorised fast path (the classical -1 16 -30 16 -1 /
+    12h^2 stencil); everything else builds per-point weights.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    n = len(x)
+    d = np.full(n, np.nan)
+    if n < 3:
+        return d
+    width = int(min(max(width, 3), n))
+    h = np.diff(x)
+    if np.any(h <= 0):
+        raise ValueError("fd_second_poly needs a strictly increasing grid")
+    uniform = (h.max() - h.min()) <= 1e-12 * h.mean()
+    if uniform and width == 5 and n >= 5:
+        hh = h.mean()
+        d[2:-2] = (-y[:-4] + 16.0 * y[1:-3] - 30.0 * y[2:-2]
+                   + 16.0 * y[3:-1] - y[4:]) / (12.0 * hh * hh)
+        for i in (1, n - 2):
+            lo = max(0, min(i - 2, n - 5))
+            d[i] = float(fd_weights(x[i], x[lo:lo + 5], 2) @ y[lo:lo + 5])
+        return d
+    half = width // 2
+    for i in range(1, n - 1):
+        lo = max(0, min(i - half, n - width))
+        w = fd_weights(x[i], x[lo:lo + width], 2)
+        d[i] = float(w @ y[lo:lo + width])
+    return d
+
+
+def breeden_litzenberger(strikes, call_prices, df=1.0, stencil="poly5"):
     """
     Risk-neutral density q(K) = (1/df) * d2C/dK2.
 
     The ultimate quality gate on a surface: a negative density anywhere is a
     butterfly arbitrage, i.e. bad data or a bad fit. Returns (K, density) with
     NaN at the two endpoints where a central second difference does not exist.
+
+    `stencil` is "poly5" (five-point local polynomial, second order on any grid;
+    see fd_second_poly) or "3pt" (the classical stencil, first order on
+    non-uniform strikes -- kept so the difference can be measured).
+
+    This is the RAW density and stays raw on purpose: its sign is the arbitrage
+    signal the panel exists to show. Anything that samples from it should go
+    through `density_for_sampling`, which floors and renormalises.
     """
     K = np.asarray(strikes, dtype=float)
     C = np.asarray(call_prices, dtype=float)
     order = np.argsort(K)
     K, C = K[order], C[order]
-    return K, fd_second(K, C) / df
+    if stencil == "3pt":
+        return K, fd_second(K, C) / df
+    if stencil != "poly5":
+        raise ValueError(f"unknown stencil {stencil!r}")
+    return K, fd_second_poly(K, C) / df
+
+
+def density_for_sampling(strikes, density, floor=None):
+    """
+    A copy of a risk-neutral density made safe for anything that SAMPLES it:
+    NaNs dropped, floored at `floor` (default: machine epsilon), renormalised to
+    unit mass under the trapezoid rule.
+
+    Deliberately separate from breeden_litzenberger. Flooring hides the sign,
+    and the sign is the diagnostic -- a Monte Carlo that draws from a density
+    with -7e-10 in its tail evaluates a negative probability, but a panel that
+    shows that -7e-10 is doing its job. Use the raw density to look, this one to
+    draw. Returns (K, q, info) where info records what the floor removed, so
+    that a floor hiding a real arbitrage shows up in a log rather than nowhere.
+    """
+    K = np.asarray(strikes, dtype=float)
+    q = np.asarray(density, dtype=float)
+    ok = np.isfinite(q) & np.isfinite(K)
+    K, q = K[ok], q[ok]
+    if len(K) < 2:
+        raise ValueError("density_for_sampling needs at least two finite points")
+    if floor is None:
+        floor = float(np.finfo(float).eps)
+    raw_mass = float(np.trapezoid(q, K))
+    negative_mass = float(np.trapezoid(np.minimum(q, 0.0), K))
+    qf = np.maximum(q, floor)
+    mass = float(np.trapezoid(qf, K))
+    if mass <= 0.0:
+        raise ValueError("density has no positive mass to renormalise")
+    # Renormalise, then floor again: dividing by a mass a hair above one would
+    # leave the floored points a rounding error BELOW the floor. The second
+    # floor moves the mass by at most n_floored * floor * dK, i.e. ~1e-14,
+    # which is as "exactly one" as floating point offers.
+    qf = np.maximum(qf / mass, floor)
+    info = {"raw_mass": raw_mass, "negative_mass": negative_mass,
+            "n_floored": int(np.count_nonzero(q < floor)),
+            "renorm_factor": 1.0 / mass, "floor": floor}
+    return K, qf, info
 
 
 # --- arbitrage --------------------------------------------------------------

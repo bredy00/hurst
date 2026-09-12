@@ -1,0 +1,592 @@
+{
+ "results": [
+  {
+   "group": "Foundations",
+   "name": "norm_pdf vs scipy",
+   "measured": 0.0,
+   "threshold": 1e-15,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Foundations",
+   "name": "norm_cdf vs scipy",
+   "measured": 2.220446049250313e-16,
+   "threshold": 1e-15,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Foundations",
+   "name": "put-call parity C-P = F-K",
+   "measured": 2.842170943040401e-14,
+   "threshold": 1e-09,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Foundations",
+   "name": "vega vs central difference",
+   "measured": 4.226748728797247e-09,
+   "threshold": 0.0001,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Foundations",
+   "name": "implied-vol round trip",
+   "measured": 8.049116928532385e-16,
+   "threshold": 1e-06,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Foundations",
+   "name": "fd_first exact on a quadratic",
+   "measured": 7.460698725481052e-14,
+   "threshold": 1e-12,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Foundations",
+   "name": "fd_second on a quadratic vs its rounding floor",
+   "measured": 0.41000122050789956,
+   "threshold": 1.0,
+   "ok": true,
+   "unit": "x floor",
+   "note": "2.08e-11 measured, floor 5.06e-11"
+  },
+  {
+   "group": "Foundations",
+   "name": "shipped 2nd derivative: order on a $1/$5 kink grid",
+   "measured": 3.0767438129908466,
+   "threshold": 2.0,
+   "ok": true,
+   "unit": "",
+   "note": "Fornberg 5-point; mapped-coordinate idea measured at 0.01"
+  },
+  {
+   "group": "Foundations",
+   "name": "3-point stencil order on the same grid (kept for contrast)",
+   "measured": 1.0857642115116206,
+   "threshold": 1.5,
+   "ok": true,
+   "unit": "",
+   "note": "the documented first-order loss"
+  },
+  {
+   "group": "Heston cf",
+   "name": "phi(0) = 1",
+   "measured": 0.0,
+   "threshold": 1e-12,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Heston cf",
+   "name": "phi(-i) = 1 (martingale)",
+   "measured": 0.0,
+   "threshold": 1e-10,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Heston cf",
+   "name": "phi(-u) = conj(phi(u))",
+   "measured": 0.0,
+   "threshold": 1e-12,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Heston cf",
+   "name": "|phi(u)| <= 1",
+   "measured": 0.9998884797979911,
+   "threshold": 1.0,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Heston cf",
+   "name": "branch continuity, shipped (max/median step)",
+   "measured": 5.241687645626823,
+   "threshold": 50.0,
+   "ok": true,
+   "unit": "",
+   "note": "Albrecher g=(a-d)/(a+d)"
+  },
+  {
+   "group": "Heston cf",
+   "name": "branch discontinuity, reciprocal form",
+   "measured": 2825.0050369181663,
+   "threshold": 500.0,
+   "ok": true,
+   "unit": "",
+   "note": "the trap, kept to prove it is real"
+  },
+  {
+   "group": "Heston cf",
+   "name": "trap / shipped separation",
+   "measured": 538.9495192974896,
+   "threshold": 100.0,
+   "ok": true,
+   "unit": "x",
+   "note": ""
+  },
+  {
+   "group": "Heston cf",
+   "name": "xi -> 0 degenerates to Black-Scholes",
+   "measured": 2.2247786310271853e-16,
+   "threshold": 1e-14,
+   "ok": true,
+   "unit": "",
+   "note": "at xi=1e-8, cancellation-free form; was 5.9e-09 at xi=1e-4"
+  },
+  {
+   "group": "Heston cf",
+   "name": "naive-form cancellation at xi=1e-6 (kept to prove it)",
+   "measured": 3.439204789648455e-05,
+   "threshold": 1e-06,
+   "ok": true,
+   "unit": "",
+   "note": "shipped form is 5.7e-13 at the same xi"
+  },
+  {
+   "group": "Pricers",
+   "name": "Lewis vs exact Black-76",
+   "measured": 3.5501115935865357e-15,
+   "threshold": 1e-10,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Pricers",
+   "name": "Carr-Madan vs exact Black-76",
+   "measured": 1.942890293094024e-16,
+   "threshold": 1e-10,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Pricers",
+   "name": "Lewis vs Carr-Madan on Heston",
+   "measured": 4.9855952699573436e-15,
+   "threshold": 1e-08,
+   "ok": true,
+   "unit": "",
+   "note": "independent routes, 5 maturities"
+  },
+  {
+   "group": "Pricers",
+   "name": "Carr-Madan insensitive to damping alpha",
+   "measured": 6.106226635438361e-16,
+   "threshold": 1e-08,
+   "ok": true,
+   "unit": "",
+   "note": "alpha 0.75 to 3.0"
+  },
+  {
+   "group": "Pricers",
+   "name": "Fourier vs Monte Carlo (sigmas)",
+   "measured": 0.36180843051721145,
+   "threshold": 5.0,
+   "ok": true,
+   "unit": "sd",
+   "note": "residual is Euler O(dt) bias"
+  },
+  {
+   "group": "Pricers",
+   "name": "simulated E[S/F] = 1",
+   "measured": 1.941473773969804e-06,
+   "threshold": 0.0006119468161619278,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Pricers",
+   "name": "risk-neutral density mass",
+   "measured": 0.999999999991692,
+   "threshold": 1.0,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Pricers",
+   "name": "risk-neutral density mean = forward",
+   "measured": 0.999999999996068,
+   "threshold": 1.0,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Pricers",
+   "name": "density non-negativity (min/peak)",
+   "measured": -8.866029388741762e-10,
+   "threshold": -1e-07,
+   "ok": true,
+   "unit": "",
+   "note": "tail dither scales as 1/dK^2"
+  },
+  {
+   "group": "Pricers",
+   "name": "sampling density: min >= eps and mass = 1",
+   "measured": 0.0,
+   "threshold": 1e-12,
+   "ok": true,
+   "unit": "",
+   "note": "floored 622 pts, removed -5.1e-10 of mass"
+  },
+  {
+   "group": "Estimators",
+   "name": "H from ATM skew (planted 0.12)",
+   "measured": 0.12000000000000005,
+   "threshold": 0.12,
+   "ok": true,
+   "unit": "",
+   "note": "r2 = 1.00000"
+  },
+  {
+   "group": "Estimators",
+   "name": "H from structure function, worst of 4 planted",
+   "measured": 0.006199501007736252,
+   "threshold": 0.03,
+   "ok": true,
+   "unit": "",
+   "note": "H = 0.10, 0.12, 0.30, 0.50"
+  },
+  {
+   "group": "Estimators",
+   "name": "two independent H routes agree",
+   "measured": 0.0028910500986608773,
+   "threshold": 0.05,
+   "ok": true,
+   "unit": "",
+   "note": "surface route vs path route"
+  },
+  {
+   "group": "Estimators",
+   "name": "forward from put-call parity",
+   "measured": 1.1368683772161603e-13,
+   "threshold": 1e-06,
+   "ok": true,
+   "unit": "",
+   "note": "r2 = 1.000000, no rate or dividend input"
+  },
+  {
+   "group": "Estimators",
+   "name": "discount factor from parity",
+   "measured": 4.440892098500626e-16,
+   "threshold": 1e-09,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Estimators",
+   "name": "SVI parameter recovery",
+   "measured": 1.4255171376653664e-08,
+   "threshold": 0.001,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Estimators",
+   "name": "SVI slice passes Durrleman",
+   "measured": 1,
+   "threshold": 1,
+   "ok": true,
+   "unit": "",
+   "note": "g_min over data = 0.2297"
+  },
+  {
+   "group": "Estimators",
+   "name": "butterfly audit: false positives on a convex slice",
+   "measured": 0,
+   "threshold": 0,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Estimators",
+   "name": "butterfly audit: catches a planted dent",
+   "measured": 2,
+   "threshold": 1,
+   "ok": true,
+   "unit": "",
+   "note": "flags the dent's neighbours"
+  },
+  {
+   "group": "Estimators",
+   "name": "calendar audit: clean on monotone w",
+   "measured": 0,
+   "threshold": 0,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Estimators",
+   "name": "calendar audit: catches a reversal",
+   "measured": 3,
+   "threshold": 1,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Calibration",
+   "name": "plant-and-recover, worst relative error",
+   "measured": 3.127276215764141e-11,
+   "threshold": 0.01,
+   "ok": true,
+   "unit": "rel",
+   "note": "7 iters, 0.6s"
+  },
+  {
+   "group": "Calibration",
+   "name": "fitted RMSE on clean data",
+   "measured": 4.062744413475721e-09,
+   "threshold": 0.001,
+   "ok": true,
+   "unit": "vol pts",
+   "note": ""
+  },
+  {
+   "group": "Calibration",
+   "name": "Jacobian condition number at the solution",
+   "measured": 30.052819283195284,
+   "threshold": 100000000.0,
+   "ok": true,
+   "unit": "",
+   "note": "high = parameters trade off; see identifiability"
+  },
+  {
+   "group": "Calibration",
+   "name": "spread of v0 under 0.5vp noise",
+   "measured": 3.7752535125654885,
+   "threshold": 10.0,
+   "ok": true,
+   "unit": "%",
+   "note": "stable"
+  },
+  {
+   "group": "Calibration",
+   "name": "spread of kappa under 0.5vp noise",
+   "measured": 34.727985983945345,
+   "threshold": 50.0,
+   "ok": true,
+   "unit": "%",
+   "note": "unidentified"
+  },
+  {
+   "group": "Calibration",
+   "name": "spread of theta under 0.5vp noise",
+   "measured": 2.8028465637173765,
+   "threshold": 50.0,
+   "ok": true,
+   "unit": "%",
+   "note": "stable"
+  },
+  {
+   "group": "Calibration",
+   "name": "spread of xi under 0.5vp noise",
+   "measured": 19.13232988302596,
+   "threshold": 50.0,
+   "ok": true,
+   "unit": "%",
+   "note": "loose"
+  },
+  {
+   "group": "Calibration",
+   "name": "spread of rho under 0.5vp noise",
+   "measured": 3.7297469709204356,
+   "threshold": 10.0,
+   "ok": true,
+   "unit": "%",
+   "note": "stable"
+  },
+  {
+   "group": "Calibration",
+   "name": "spread of kappa with a Tikhonov prior (weight 50)",
+   "measured": 0.07280859297454062,
+   "threshold": 10.0,
+   "ok": true,
+   "unit": "%",
+   "note": "prior from a history or a variance swap"
+  },
+  {
+   "group": "Markovian lift",
+   "name": "K(t) = int e^-xt mu(dx) representation",
+   "measured": 6.673398777994893e-10,
+   "threshold": 1e-08,
+   "ok": true,
+   "unit": "rel",
+   "note": "mu(dx) = x^-a / (Gamma(a)Gamma(1-a)) dx, a = H+1/2"
+  },
+  {
+   "group": "Markovian lift",
+   "name": "kernel error, N=24, t in [1 day, 2 y]",
+   "measured": 0.008696581705958375,
+   "threshold": 0.01,
+   "ok": true,
+   "unit": "rel",
+   "note": "max relative; H = 0.12"
+  },
+  {
+   "group": "Markovian lift",
+   "name": "kernel error on [1 hour, 2 y]",
+   "measured": 0.008696581705958375,
+   "threshold": 0.01,
+   "ok": true,
+   "unit": "rel",
+   "note": "a one-day option lives here; 12% below 5 minutes"
+  },
+  {
+   "group": "Markovian lift",
+   "name": "Laplace-domain error, z in [0.1, 100] (plan: 1%, see note)",
+   "measured": 0.03507577343510438,
+   "threshold": 0.05,
+   "ok": true,
+   "unit": "rel",
+   "note": "3.5% is the memory beyond 2 y; 1% is not reachable with a 2 y fit"
+  },
+  {
+   "group": "Markovian lift",
+   "name": "Laplace-domain error on the pricing band z in [1, 100]",
+   "measured": 0.014185702305392463,
+   "threshold": 0.03,
+   "ok": true,
+   "unit": "rel",
+   "note": "a year down to a few days"
+  },
+  {
+   "group": "Markovian lift",
+   "name": "lifted recursion == SOE convolution (identity)",
+   "measured": 4.0523140398818214e-14,
+   "threshold": 1e-12,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Markovian lift",
+   "name": "lifted path vs true-kernel Volterra path (L2, same noise)",
+   "measured": 0.008001259501771076,
+   "threshold": 0.01,
+   "ok": true,
+   "unit": "rel",
+   "note": ""
+  },
+  {
+   "group": "Markovian lift",
+   "name": "N=1 at x=0 reproduces closed-form Heston (ETDRK4, 200 steps)",
+   "measured": 7.085810192743461e-10,
+   "threshold": 1e-09,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Markovian lift",
+   "name": "full N-node lift at H = 0.4999 vs Heston",
+   "measured": 1.641503986565642e-05,
+   "threshold": 0.0001,
+   "ok": true,
+   "unit": "",
+   "note": "shrinks 10x per decade of (1/2 - H)"
+  },
+  {
+   "group": "Markovian lift",
+   "name": "ETDRK4 vs implicit trapezoidal + Richardson (H=0.12)",
+   "measured": 3.7941004989257762e-06,
+   "threshold": 5e-06,
+   "ok": true,
+   "unit": "",
+   "note": "independent time-steppers, 1 d / 30 d / 1 y"
+  },
+  {
+   "group": "Markovian lift",
+   "name": "rough objective evaluation, 10 expiries x 13 strikes",
+   "measured": 0.9182964999999967,
+   "threshold": 3.0,
+   "ok": true,
+   "unit": "s",
+   "note": "auto scheme; vanilla Heston is ~14 ms"
+  },
+  {
+   "group": "Engineering",
+   "name": "scipy modules on the live import path",
+   "measured": 0,
+   "threshold": 0,
+   "ok": true,
+   "unit": "",
+   "note": "scipy.stats alone costs 5.8 s"
+  },
+  {
+   "group": "Engineering",
+   "name": "startup to actionable error, no TWS",
+   "measured": 0.5581019999990531,
+   "threshold": 3.0,
+   "ok": true,
+   "unit": "s",
+   "note": "was 9.6 s before lazy imports"
+  },
+  {
+   "group": "Engineering",
+   "name": "calibration objective evaluation",
+   "measured": 9.564379999937955,
+   "threshold": 200.0,
+   "ok": true,
+   "unit": "ms",
+   "note": "39 quotes; 470 ms before vectorising"
+  },
+  {
+   "group": "Engineering",
+   "name": "Gauss-Legendre rules constructed",
+   "measured": 1,
+   "threshold": 1,
+   "ok": true,
+   "unit": "",
+   "note": "2 reuses; leggauss is O(n^2)"
+  },
+  {
+   "group": "Engineering",
+   "name": "quadrature tolerance 1e-12 vs 1e-14",
+   "measured": 0.0,
+   "threshold": 1e-12,
+   "ok": true,
+   "unit": "",
+   "note": "calibration runs at 1e-12, ~2x faster"
+  },
+  {
+   "group": "Engineering",
+   "name": "replay round-trip fidelity",
+   "measured": 0.0,
+   "threshold": 1e-12,
+   "ok": true,
+   "unit": "",
+   "note": "recorded vs replayed surface points"
+  }
+ ],
+ "seconds": 19.776410599999508,
+ "python": "3.12.3",
+ "numpy": "2.5.2"
+}

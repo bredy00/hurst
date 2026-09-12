@@ -293,6 +293,87 @@ def test_identifiability_mechanism():
           "the process has relaxed")
 
 
+def test_tikhonov_prior():
+    """
+    The regularised answer to the identifiability finding. A prior on kappa
+    must (a) leave a clean fit alone when it agrees with the data, (b) collapse
+    the noise-seed spread of kappa without costing fit quality, and (c) report
+    what it paid when it disagrees, rather than hide it.
+    """
+    print("\nC3 -- Tikhonov prior on kappa")
+    from calibrate.fit import prior_residuals
+    from models.heston import variance_swap_rate, kappa_from_variance_swap
+
+    S = build_surface(FAST_TAUS)
+    plain = calibrate_heston(S, starts=DEFAULT_STARTS[:1])
+    pinned = calibrate_heston(S, starts=DEFAULT_STARTS[:1],
+                              prior={'kappa': TRUE.kappa}, prior_weight=50.0)
+    check("a prior at the truth changes a clean fit by less than 0.1%",
+          abs(pinned['params'].kappa - plain['params'].kappa) / TRUE.kappa < 1e-3,
+          f"kappa {plain['params'].kappa:.5f} -> {pinned['params'].kappa:.5f}")
+    check("prior cost is reported separately from data cost",
+          'prior_cost' in pinned and 'data_cost' in pinned
+          and abs(pinned['prior_cost'] + pinned['data_cost'] - pinned['cost']) < 1e-12,
+          f"prior {pinned['prior_cost']:.2e}, data {pinned['data_cost']:.2e}")
+    check("no prior -> zero prior cost", plain['prior_cost'] == 0.0)
+
+    noise = 0.005
+    free, reg = [], []
+    for s in range(4):
+        Sn = build_surface(FAST_TAUS, noise=noise, seed=s)
+        free.append(calibrate_heston(Sn, starts=DEFAULT_STARTS[:1]))
+        reg.append(calibrate_heston(Sn, starts=DEFAULT_STARTS[:1],
+                                    prior={'kappa': TRUE.kappa}, prior_weight=50.0))
+
+    def spread(fits, name):
+        v = np.array([getattr(f['params'], name) for f in fits])
+        return float(np.std(v) / abs(np.mean(v)))
+
+    sf, sr = spread(free, 'kappa'), spread(reg, 'kappa')
+    print(f"      kappa spread across noise seeds: free {sf*100:.1f}%  regularised {sr*100:.1f}%")
+    check("the prior collapses the kappa spread by at least 3x", sr < sf / 3.0,
+          f"{sf*100:.1f}% -> {sr*100:.1f}%")
+    check("...to under 10%", sr < 0.10, f"{sr*100:.1f}%")
+    rf = max(f['rmse_vol'] for f in free)
+    rr = max(f['rmse_vol'] for f in reg)
+    check("without costing fit quality (rmse within 10% of the free fit)",
+          rr < 1.1 * rf, f"rmse {rf*100:.3f} -> {rr*100:.3f} vol points")
+
+    # A WRONG prior must show up in the bill
+    wrong = calibrate_heston(S, starts=DEFAULT_STARTS[:1],
+                             prior={'kappa': 2.0 * TRUE.kappa}, prior_weight=50.0)
+    check("a wrong prior pays a visible prior cost",
+          wrong['prior_cost'] > 100.0 * pinned['prior_cost'] + 1e-6,
+          f"prior cost {wrong['prior_cost']:.3e} vs {pinned['prior_cost']:.3e} at the truth")
+    check("...and is pulled between data and prior, not to either",
+          TRUE.kappa < wrong['params'].kappa < 2.0 * TRUE.kappa,
+          f"kappa = {wrong['params'].kappa:.4f} between {TRUE.kappa} and {2*TRUE.kappa}")
+
+    # prior_residuals unit behaviour
+    r = prior_residuals(TRUE, HESTON_TRANSFORM, {'kappa': 1.0}, 4.0)
+    check("prior residual is sqrt(lambda) * relative deviation",
+          abs(r[0] - 2.0 * (TRUE.kappa - 1.0) / 1.0) < 1e-12, f"{r}")
+    try:
+        prior_residuals(TRUE, HESTON_TRANSFORM, {'nu': 1.0}, 1.0)
+        bad = False
+    except KeyError:
+        bad = True
+    check("a prior on an unknown parameter is refused", bad)
+
+    # The variance-swap route to a kappa prior
+    rate = variance_swap_rate(TRUE, 1.5)
+    k = kappa_from_variance_swap(TRUE.v0, TRUE.theta, 1.5, rate)
+    check("kappa recovered from a variance-swap rate", abs(k - TRUE.kappa) < 1e-6,
+          f"{k:.8f}")
+    check("an impossible rate returns None, not a number",
+          kappa_from_variance_swap(TRUE.v0, TRUE.theta, 1.5, 0.5) is None)
+    vs_pinned = calibrate_heston(S, starts=DEFAULT_STARTS[:1],
+                                 prior={'kappa': k}, prior_weight=200.0)
+    check("pinning kappa from the variance swap reproduces the truth",
+          abs(vs_pinned['params'].kappa - TRUE.kappa) / TRUE.kappa < 1e-3,
+          f"kappa {vs_pinned['params'].kappa:.5f}")
+
+
 if __name__ == "__main__":
     print("=" * 74)
     print("Session C -- calibration")
@@ -305,6 +386,7 @@ if __name__ == "__main__":
     test_multistart()
     test_identifiability()
     test_identifiability_mechanism()
+    test_tikhonov_prior()
     print("\n" + "=" * 74)
     print(f"{len(PASS)} passed, {len(FAIL)} failed   ({time.perf_counter()-t0:.0f}s)")
     for f in FAIL:

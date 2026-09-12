@@ -24,6 +24,7 @@ import numpy as np
 
 from calibrate.objective import CALIB_TOL, residuals, rmse_vol
 from models.heston import HestonParams, char_func
+import models.rough_heston as rh
 
 
 @dataclass(frozen=True)
@@ -203,7 +204,37 @@ DEFAULT_STARTS = (
 )
 
 
-def calibrate(surface, cf_factory, transform, starts, tol=CALIB_TOL, **lm_kw):
+def prior_residuals(params, transform, prior, prior_weight):
+    """
+    Tikhonov rows: sqrt(lambda_j) * (p_j - prior_j) / |prior_j| for each named
+    parameter in `prior`. Returns an empty array when there is no prior.
+
+    Relative deviation, not absolute, so kappa ~ 2 and v0 ~ 0.04 are penalised on
+    the same footing. Units: one data residual is (model - market vol) / vol
+    error, i.e. "standard errors of one quote". A weight lambda therefore means
+    "a 100% deviation from the prior costs as much as lambda quotes each off by
+    one standard error". With 130 quotes, lambda ~ 10 is a light hand and
+    lambda ~ 1000 is a pin.
+    """
+    if not prior:
+        return np.zeros(0)
+    if prior_weight is None:
+        prior_weight = 1.0
+    rows = []
+    for name, target in prior.items():
+        if name not in transform.names:
+            raise KeyError(f"prior on unknown parameter {name!r}")
+        lam = (prior_weight[name] if isinstance(prior_weight, dict)
+               else float(prior_weight))
+        if lam <= 0.0:
+            continue
+        scale = abs(float(target)) if abs(float(target)) > 1e-12 else 1.0
+        rows.append(math.sqrt(lam) * (getattr(params, name) - float(target)) / scale)
+    return np.asarray(rows, dtype=float)
+
+
+def calibrate(surface, cf_factory, transform, starts, tol=CALIB_TOL,
+              prior=None, prior_weight=None, pricer=None, **lm_kw):
     """
     Fit a model to a surface from several starting points, keep the best.
 
@@ -212,11 +243,26 @@ def calibrate(surface, cf_factory, transform, starts, tol=CALIB_TOL, **lm_kw):
     mean-reversion basin that matches the level and misses the skew entirely --
     and a single start silently returns whichever basin it happened to land in.
     Four starts spread across the plausible region is cheap insurance.
+
+    `prior` / `prior_weight` add Tikhonov regularisation towards named parameter
+    values (see prior_residuals), appended as extra rows of the residual vector
+    so the Levenberg-Marquardt machinery is unchanged. This is the honest answer
+    to the kappa identifiability finding: a surface that stops before the
+    relaxation time 1/kappa cannot determine kappa, so either say so, or supply
+    the missing information explicitly -- a historical moving average of fitted
+    kappas, or a value pinned from the variance-swap term structure
+    (models.heston.kappa_from_variance_swap) -- and report what it cost. The
+    result carries `data_cost` and `prior_cost` separately for that reason: a
+    prior that is paying a lot is a prior that disagrees with the market.
     """
+    pk = {} if pricer is None else {"pricer": pricer}
+
     def make_fun():
         def fun(x):
             p = transform.from_x(x)
-            r, _ = residuals(p, surface, cf_factory, tol=tol)
+            r, _ = residuals(p, surface, cf_factory, tol=tol, **pk)
+            if prior:
+                r = np.concatenate([r, prior_residuals(p, transform, prior, prior_weight)])
             return r
         return fun
 
@@ -231,9 +277,12 @@ def calibrate(surface, cf_factory, transform, starts, tol=CALIB_TOL, **lm_kw):
         if best is None or cost < best["cost"]:
             best = {"params": p, "cost": cost, "x": x, **info}
 
-    best["rmse_vol"] = rmse_vol(best["params"], surface, cf_factory, tol=tol)
+    best["rmse_vol"] = rmse_vol(best["params"], surface, cf_factory, tol=tol, **pk)
     best["trials"] = trials
     best["n_starts"] = len(starts)
+    pr = prior_residuals(best["params"], transform, prior, prior_weight) if prior else np.zeros(0)
+    best["prior_cost"] = float(pr @ pr)
+    best["data_cost"] = best["cost"] - best["prior_cost"]
     # How much the answer depended on where we started -- if this is large, the
     # objective is multi-modal and a single-start fit would have been a coin flip.
     costs = [t["cost"] for t in trials]
@@ -241,11 +290,82 @@ def calibrate(surface, cf_factory, transform, starts, tol=CALIB_TOL, **lm_kw):
     return best
 
 
-def calibrate_heston(surface, starts=DEFAULT_STARTS, tol=CALIB_TOL, **lm_kw):
+def calibrate_heston(surface, starts=DEFAULT_STARTS, tol=CALIB_TOL, prior=None,
+                     prior_weight=None, **lm_kw):
     """Fit vanilla Heston. Feller is reported in the result, never enforced."""
     res = calibrate(surface, heston_cf_factory, HESTON_TRANSFORM, starts,
-                    tol=tol, **lm_kw)
+                    tol=tol, prior=prior, prior_weight=prior_weight, **lm_kw)
     res["feller"] = res["params"].feller
     p = res["params"]
     res["feller_margin"] = 2.0 * p.kappa * p.theta - p.xi * p.xi
     return res
+
+
+# ------------------------------------------------------------ rough Heston
+# H is bounded away from 0 (the kernel t^(H-1/2) is not integrable-squared
+# there and the lift's node range was built for H >= 0.05) and capped at 1/2,
+# where the model IS Heston. Everything else shares Heston's box.
+ROUGH_BOUNDS = dict(BOUNDS, H=(0.02, 0.5))
+
+
+def _rough_to_x(p):
+    return np.array([_to_x(getattr(p, n), *ROUGH_BOUNDS[n]) for n in rh.RoughHestonParams.NAMES])
+
+
+def _rough_from_x(x):
+    vals = {n: _from_x(x[i], *ROUGH_BOUNDS[n]) for i, n in enumerate(rh.RoughHestonParams.NAMES)}
+    return rh.RoughHestonParams(**vals)
+
+
+ROUGH_TRANSFORM = Transform(names=rh.RoughHestonParams.NAMES,
+                            to_x=_rough_to_x, from_x=_rough_from_x)
+
+DEFAULT_ROUGH_STARTS = (
+    rh.RoughHestonParams(v0=0.04, kappa=2.0, theta=0.04, xi=0.5, rho=-0.5, H=0.15),
+    rh.RoughHestonParams(v0=0.09, kappa=0.8, theta=0.06, xi=1.0, rho=-0.7, H=0.10),
+)
+
+
+def calibrate_rough_heston(surface, starts=DEFAULT_ROUGH_STARTS, tail_tol=1e-9,
+                           N=rh.N_DEFAULT, prior=None, prior_weight=None, **lm_kw):
+    """
+    Fit the lifted rough Heston with the SAME driver as vanilla Heston -- that
+    is the point of the shared `char_func` interface; nothing in
+    levenberg_marquardt or the objective knows which model it is fitting.
+
+    Three things differ from calibrate_heston, all on the pricing side:
+
+    - the pricer is a RoughPricer, which sizes its quadrature from the model
+      (the generic pricer's doubling probe would cost a Riccati solve per probe)
+      and freezes the grid per maturity so the objective is smooth;
+    - the finite-difference step for the Jacobian is 1e-3 rather than 1e-5:
+      the ODE step count changes discretely with the parameters, which puts
+      ~1e-8 kinks in the characteristic function, and a 1e-5 step would divide
+      that noise by too little;
+    - `tail_tol` is the pricer's tail tolerance, not a quadrature tolerance.
+
+    Cost: about 0.1-0.4 s per objective evaluation for a 3-expiry test
+    surface and ~1.5 s for the ten-expiry rough surface, so a full multi-start
+    fit is minutes, not seconds. `max_seconds` is honoured.
+    """
+    lm_kw.setdefault("step", 1e-3)
+    pricer = RoughPricerFactory(tail_tol, N)
+    res = calibrate(surface, pricer.cf_factory, ROUGH_TRANSFORM, starts,
+                    tol=tail_tol, prior=prior, prior_weight=prior_weight,
+                    pricer=pricer.pricer, **lm_kw)
+    p = res["params"]
+    res["kernel_error"] = rh.kernel_error(p.H, N)[0]
+    res["pricer_stats"] = dict(pricer.pricer.stats)
+    res["N"] = N
+    return res
+
+
+class RoughPricerFactory:
+    """Binds one RoughPricer and one cf factory (same N) for a calibration run."""
+
+    def __init__(self, tail_tol, N):
+        self.N = N
+        self.pricer = rh.RoughPricer(tol=tail_tol, N=N)
+
+    def cf_factory(self, p, tau):
+        return rh.cf_factory(p, tau, N=self.N)
