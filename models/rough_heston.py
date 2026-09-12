@@ -310,28 +310,40 @@ def _phi123(c):
     return (np.where(small, p1, q1), np.where(small, p2, q2), np.where(small, p3, q3))
 
 
-C_STAB = 2.0        # explicit-stage stability constant, see stability_steps
+# Stability constants on z = h^alpha / Gamma(1+alpha) * (xi (1+|rho|) |u|_max + kappa),
+# one per scheme, both MEASURED as the edge where |phi(u - i/2)| first exceeds one
+# over u in [0, 1200] (it may never exceed one for a correct solve):
+#   etdrk4   stable at 2.65, blows up at 4.0                     -> 2.0 used
+#   exptrap  stable at z = 10.3 .. 14.7, blows up at 24.6 .. 30.3 -> 12.0 used
+# measured at H = 0.02 and 0.12, maturities 30 d to 1 y.
+C_STAB = {"etdrk4": 2.0, "exptrap": 12.0}
 
 
-def stability_steps(tau, u_abs_max, p, grade=1.0, min_steps=24, c_stab=None):
+def stability_steps(tau, u_abs_max, p, grade=1.0, min_steps=24, c_stab=None,
+                    scheme="etdrk4"):
     """
-    Number of ETDRK4 steps for a stable solve over the u range requested.
+    Number of steps for a stable solve over the u range requested.
 
-    The linear part -x_i psi_i is integrated exactly, so the stiff fast factors
-    cost nothing. What limits the step is the EXPLICIT treatment of F(Psi): the
-    Riccati Jacobian |dF/dPsi| grows like xi |u| (1 + |rho|) + kappa, and the
-    kernel feeds it back over one step with weight int_0^h K(s) ds = h^alpha /
-    Gamma(1+alpha). The RK4-type stability region then requires
+    The linear part -x_i psi_i is integrated exactly in both schemes, so the
+    stiff fast factors cost nothing. What limits the step is the treatment of
+    F(Psi): the Riccati Jacobian |dF/dPsi| grows like xi |u| (1 + |rho|) +
+    kappa, and the kernel feeds it back over one step with weight
+    int_0^h K(s) ds = h^alpha / Gamma(1+alpha). Stability then requires
 
-        h^alpha / Gamma(1+alpha) * G  <  C_STAB,    G = xi (1+|rho|) |u|_max + kappa.
+        h^alpha / Gamma(1+alpha) * G  <  C_STAB[scheme],   G = xi (1+|rho|) |u|_max + kappa.
 
-    Measured: at 4.0 the largest u blow up, at 2.65 they do not; 2.0 is used.
-    For H = 1/2 this is the ordinary RK4 limit h G < 2; for H = 0.12 the
-    singular kernel makes it roughly ten times stricter at the same u, which is
-    the cost of integrating a rough model explicitly and the reason the
-    'exptrap' scheme exists.
+    For H = 1/2 and ETDRK4 this is the ordinary RK4 limit h G < 2. The rough
+    kernel makes it much stricter at the same u, because h^alpha >> h for
+    small h.
+
+    The implicit scheme is NOT unconditionally stable. An earlier version of
+    this module said it was, on the strength of tests that only probed u up to
+    each maturity's pricing range; driven to u = 1200 at H = 0.12 and 90 days,
+    120 implicit steps return |phi(u - i/2)| = 1e36 where the true value is
+    below one. Its constant is six times better than ETDRK4's, which at
+    alpha = 0.62 is eighteen times fewer steps -- not infinitely many.
     """
-    cs = C_STAB if c_stab is None else c_stab
+    cs = C_STAB[scheme] if c_stab is None else c_stab
     alpha = p.H + 0.5
     G = p.xi * (1.0 + abs(p.rho)) * float(u_abs_max) + p.kappa
     h_max = (cs * math.gamma(1.0 + alpha) / G) ** (1.0 / alpha)
@@ -386,8 +398,10 @@ def n_panels_for(u_max, k_abs_max, per_unit=1.5, order=64, lo=2, hi=8000):
     return int(min(max(math.ceil(n_nodes / order), lo), hi))
 
 
-AUTO_ETDRK4_MAX_STEPS = 300   # above this, 'auto' switches to the implicit scheme
-AUTO_EXPTRAP_STEPS = 120      # base step count for exptrap + Richardson in 'auto'
+AUTO_EXPTRAP_STEPS = 120      # accuracy floor for exptrap + Richardson in 'auto'
+# Relative cost per step, measured at N = 20, n_u = 300: ETDRK4 277 us, exptrap
+# 203 us. Richardson runs exptrap at M and 2M, i.e. 3M steps.
+COST_PER_STEP = {"etdrk4": 1.36, "exptrap": 1.0}
 
 
 def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
@@ -416,10 +430,11 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
                kernel is ten times stricter than for Heston.
     'exptrap'  Exponential trapezoidal rule with the nonlinear term IMPLICIT.
                Because F is quadratic, the implicit equation for Psi^{n+1} is a
-               scalar quadratic per u with a closed-form root, so the scheme is
-               unconditionally stable and costs about half an ETDRK4 step.
-               Second order; use it with Richardson (see char_func) or accept
-               ~1e-5 cf error at 200 steps, which calibration can.
+               scalar quadratic per u with a closed-form root, and a step costs
+               about three quarters of an ETDRK4 step. Its stability constant is
+               six times ETDRK4's but it is NOT unconditionally stable -- see
+               stability_steps for the measurement that corrected that claim.
+               Second order; use it with Richardson (see char_func).
 
     The only coupling between factors is through the scalar Psi, so stages are
     never formed factor by factor: each needs a weighted sum of the state (two
@@ -430,10 +445,12 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
     v0, kappa, theta, xi, rho, H = p.as_tuple()
     w, x = lift_nodes(H, N)
     if steps is None:
+        u_abs = float(np.max(np.abs(u)))
         if scheme == "etdrk4":
-            steps = stability_steps(tau, float(np.max(np.abs(u))), p, grade, c_stab=c_stab)
+            steps = stability_steps(tau, u_abs, p, grade, c_stab=c_stab, scheme="etdrk4")
         else:
-            steps = 200
+            steps = max(AUTO_EXPTRAP_STEPS,
+                        stability_steps(tau, u_abs, p, grade, c_stab=c_stab, scheme="exptrap"))
     M = int(max(1, round(steps * steps_mult)))
 
     iu = 1j * u
@@ -466,10 +483,23 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
         wE = E * w[None, :]
         wE2 = E2 * w[None, :]
         wA1, wA2, wA3 = A1 @ w, A2 @ w, A3 @ w
+        # The two products in this loop are chosen by measurement, per size.
+        # Contraction w @ psi: OpenBLAS pays ~80 us of thread dispatch per call
+        # whatever the size, so einsum wins below ~1000 u-nodes (39 vs 79 us at
+        # 512) and matmul above (85 vs 143 us at 2048). Rank-3 update: one
+        # real @ complex product on a pre-stacked (N, 3) matrix, 23 us at 512 --
+        # broadcasting A1[:, None] * Nu + ... was tried and cost 438 us.
+        use_einsum = n_u <= 1024
+        Astack = np.stack([A1, A2, A3], axis=2)          # (M, N, 3)
+        Vbuf = np.empty((3, n_u), dtype=complex)
         for j in range(M):
             h = hs[j]
-            S2 = wE2[j] @ psi
-            S1 = wE[j] @ psi
+            if use_einsum:
+                S2 = np.einsum("i,ij->j", wE2[j], psi)
+                S1 = np.einsum("i,ij->j", wE[j], psi)
+            else:
+                S2 = wE2[j] @ psi
+                S1 = wE[j] @ psi
             Nu = F(Psi)
             Gu = kt * Psi + v0 * Nu
             Pa = S2 + s_h[j] * Nu
@@ -480,7 +510,10 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
             Nc = F(Pc)
             Nab = Na + Nb
             psi *= E[j][:, None]
-            psi += np.column_stack([A1[j], A2[j], A3[j]]) @ np.vstack([Nu, Nab, Nc])
+            Vbuf[0] = Nu
+            Vbuf[1] = Nab
+            Vbuf[2] = Nc
+            psi += Astack[j] @ Vbuf
             Psi = S1 + wA1[j] * Nu + wA2[j] * Nab + wA3[j] * Nc
             phi += (h / 6.0) * (Gu + 2.0 * (kt * (Pa + Pb) + v0 * Nab)
                                 + kt * Pc + v0 * Nc)
@@ -501,9 +534,10 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
     a0 = B0 @ w
     a1 = B1 @ w
     Fn = F(Psi)
+    use_einsum = n_u <= 1024          # see the ETDRK4 loop for the measurement
     for j in range(M):
         h = hs[j]
-        S1 = wE[j] @ psi
+        S1 = np.einsum("i,ij->j", wE[j], psi) if use_einsum else wE[j] @ psi
         A = a1[j] * q
         Bq = a1[j] * lin - 1.0
         Cq = S1 + a0[j] * Fn + a1[j] * b0
@@ -521,39 +555,59 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
     return phi.reshape(np.shape(u)) if np.ndim(u) else phi
 
 
+def choose_scheme(tau, u_abs_max, p, grade=1.0):
+    """
+    ('etdrk4', M) or ('exptrap', M) -- whichever is cheaper at its own stable
+    step count, with exptrap carrying Richardson (3M steps) and an accuracy
+    floor of AUTO_EXPTRAP_STEPS.
+    """
+    m_e = stability_steps(tau, u_abs_max, p, grade, scheme="etdrk4")
+    m_t = max(AUTO_EXPTRAP_STEPS, stability_steps(tau, u_abs_max, p, grade, scheme="exptrap"))
+    if COST_PER_STEP["etdrk4"] * m_e <= COST_PER_STEP["exptrap"] * 3 * m_t:
+        return "etdrk4", m_e
+    return "exptrap", m_t
+
+
 def char_func(u, tau, p, N=N_DEFAULT, scheme="auto", richardson=False, **kw):
     """
     cf(u) = E[exp(i u X_tau)] for the lifted rough Heston.
 
-    scheme 'auto' uses ETDRK4 when its stability step count for this u range
-    is at most AUTO_ETDRK4_MAX_STEPS, and exptrap with Richardson otherwise.
-    Measured on the ten-expiry rough surface, that keeps every expiry near a
-    few hundred step-equivalents: ETDRK4 alone needs ~1000 steps at one year
-    (its step is tied to |u|_max), exptrap alone needs ~5x its cost at one day
-    to match ETDRK4's accuracy there.
+    scheme 'auto' takes whichever of ETDRK4 and exptrap-with-Richardson is
+    cheaper at its own stable step count for this u range (choose_scheme):
+    ETDRK4 at short maturities, where its step count is small, exptrap at long
+    ones, where ETDRK4's step is pinned by |u|.
 
     `richardson=True` with scheme='exptrap' runs M and 2M steps and combines
     (4 cf_2M - cf_M) / 3, which cancels the leading O(h^2) error: measured
-    against closed-form Heston the order goes from 2.00 to 4.00.
+    against closed-form Heston the order goes from 2.00 to 4.00. The two solves
+    also give an error estimate for free, which the Lewis pricer uses.
     """
     if scheme == "auto":
-        u_abs = float(np.max(np.abs(u)))
-        if stability_steps(tau, u_abs, p, kw.get("grade", 1.0), c_stab=kw.get("c_stab")) \
-                <= AUTO_ETDRK4_MAX_STEPS:
-            scheme = "etdrk4"
-        else:
-            scheme, richardson = "exptrap", True
-            kw.setdefault("steps", AUTO_EXPTRAP_STEPS)
+        scheme, m = choose_scheme(tau, float(np.max(np.abs(u))), p, kw.get("grade", 1.0))
+        if scheme == "exptrap":
+            richardson = True
+        kw.setdefault("steps", m)
     if richardson and scheme == "exptrap":
-        steps = kw.pop("steps", 200)
+        steps = kw.pop("steps", None)
+        if steps is None:
+            steps = max(AUTO_EXPTRAP_STEPS,
+                        stability_steps(tau, float(np.max(np.abs(u))), p,
+                                        kw.get("grade", 1.0), scheme="exptrap"))
         a = log_char_func(u, tau, p, N=N, steps=steps, scheme=scheme, **kw)
         b = log_char_func(u, tau, p, N=N, steps=2 * steps, scheme=scheme, **kw)
-        out = (4.0 * np.exp(b) - np.exp(a)) / 3.0
+        out = (4.0 * _safe_exp(b) - _safe_exp(a)) / 3.0
     else:
-        out = np.exp(log_char_func(u, tau, p, N=N, scheme=scheme, **kw))
+        out = _safe_exp(log_char_func(u, tau, p, N=N, scheme=scheme, **kw))
     if np.ndim(u) == 0:
         return out.reshape(())[()]
     return out
+
+
+def _safe_exp(z):
+    """exp of a complex array without overflow: a blown-up solve returns a huge
+    finite number the checks can see, never inf or nan."""
+    z = np.asarray(z, dtype=complex)
+    return np.exp(np.clip(z.real, -745.0, 700.0) + 1j * np.nan_to_num(z.imag))
 
 
 def cf_factory(p, tau, N=N_DEFAULT, **kw):
@@ -566,6 +620,7 @@ def cf_factory(p, tau, N=N_DEFAULT, **kw):
         return char_func(u, tau, p, N=N, **{**kw, **override})
     cf.params = p
     cf.tau = tau
+    cf.N = N
     return cf
 
 
@@ -579,100 +634,195 @@ def pricer_settings(p, tau, k_abs_max, tol=1e-10, per_unit=1.5):
     return um, n_panels_for(um, k_abs_max, per_unit)
 
 
-def call_prices(ks, tau, p, tol=1e-9, alpha=1.5, N=N_DEFAULT, max_extend=3, **kw):
+def call_prices(ks, tau, p, tol=1e-9, N=N_DEFAULT, steps_mult=1.0, **kw):
     """
-    Undiscounted Carr-Madan call values (units of F) for a strip of
-    log-moneyness at one maturity, with the quadrature range set by the model
-    itself and CHECKED: after the solve the integrand's last panel is inspected
-    and, if it has not decayed below `tol`, the range is extended by 1.5x and
-    the solve repeated (at most `max_extend` times). Returns (prices, info).
+    Undiscounted call values (units of F) for a strip of log-moneyness at one
+    maturity: (prices, info). The single entry point for pricing this model;
+    see lewis_prices for the contour, the checks and the refinement.
 
-    This exists because the rough cf's u-tail is fatter than Heston's at short
-    maturities and no closed-form envelope was found to be reliable there;
-    checking the computed tail is cheaper than being wrong about it.
+    An earlier version priced on the Carr-Madan contour with alpha = 1.5. That
+    needs E[S^2.5] < inf, a calibration walked to parameters where it is not,
+    and the pricer returned 1e18 there. Lewis needs only E[S^(1/2)].
+    """
+    return lewis_prices(ks, tau, p, tol=tol, N=N, steps_mult=steps_mult, **kw)
+
+
+PHI_BOUND_TOL = 1e-6        # |phi(u - i/2)| may exceed 1 by at most this
+ETDRK4_MARGIN = 1.5         # steps above the stability edge, for accuracy at 1 day
+
+
+def lewis_grid(u_max, k_abs_max, order=64, first=2.0, periods=6.0):
+    """
+    Gauss-Legendre nodes on [0, u_max] in panels that DOUBLE in width, capped so
+    no panel holds more than `periods` turns of e^{-iuk}.
+
+    The Lewis integrand phi(u - i/2) / (u^2 + 1/4) carries nearly all of its
+    mass at small u and is smooth and tiny far out, so a uniform grid spends
+    most of its nodes where nothing is. Measured against the uniform composite
+    rule at the same u_max: 2176 -> 640 nodes at one day, 4608 -> 704 at the
+    runaway parameters, IV differences at the level of the cf's own error
+    (< 2e-3 vol points away from the one-day wings).
     """
     import pricing.fourier as fo
 
+    x, w = fo._leggauss(int(order))
+    cap = periods * 2.0 * math.pi / max(float(k_abs_max), 1e-3)
+    edges = [0.0]
+    width = float(first)
+    while edges[-1] < u_max:
+        edges.append(min(edges[-1] + min(width, cap), float(u_max)))
+        width *= 2.0
+    e = np.asarray(edges)
+    lo, hi = e[:-1], e[1:]
+    half = 0.5 * (hi - lo)
+    nodes = (half[:, None] * (x[None, :] + 1.0) + lo[:, None]).ravel()
+    weights = (half[:, None] * w[None, :]).ravel()
+    return nodes, weights
+
+
+def _lewis_solve(ks, tau, p, u_max, n_panels, N, steps, tol_price, steps_mult=1.0):
+    """
+    One Lewis pricing pass on a fixed grid with a-posteriori error control.
+
+    Returns (prices, info). The cf is computed at M and 2M exptrap steps (or
+    ETDRK4 at M and 2M when that is cheaper) so every pass carries its own error
+    estimate, and two checks decide whether the pass is trusted:
+
+      invariant   |phi(u - i/2)| <= E[S^(1/2)] <= 1 for ANY martingale model
+                  (Jensen). A solve that breaks it is wrong, full stop.
+      error       the Lewis integral of |phi_2M - phi_M| / (u^2 + 1/4) / 3 -- the
+                  error of the 2M solve -- below tol_price. That is an
+                  INSTABILITY detector, not an accuracy target: the Richardson
+                  value returned is orders of magnitude better than the 2M solve
+                  (measured 1.2e-6 -> 1.9e-11 at H = 1/2), while an unstable
+                  solve differs between M and 2M at O(1). A 1e-8 target was
+                  tried first and forced 3-4 refinements at the TRUE parameters,
+                  a 15x slowdown for accuracy nothing downstream can see.
+    """
+    import pricing.fourier as fo
+
+    v, w = lewis_grid(u_max, float(np.max(np.abs(ks))) if np.size(ks) else 0.0)
+    z = v - 0.5j
+    kern = 1.0 / (v * v + 0.25)
+    scheme, m_stab = choose_scheme(tau, u_max, p)
+    if scheme == "exptrap":
+        # Richardson needs M and 2M anyway, so the error estimate is free. The
+        # extrapolated value's error is far below |phi_2M - phi_M| / 3; using
+        # the latter is deliberately conservative.
+        M = int(math.ceil(steps_mult * max(int(steps), m_stab)))
+        ea = _safe_exp(log_char_func(z, tau, p, N=N, steps=M, scheme=scheme))
+        eb = _safe_exp(log_char_func(z, tau, p, N=N, steps=2 * M, scheme=scheme))
+        phi = (4.0 * eb - ea) / 3.0
+        err_price = float(np.sum(w * np.abs(eb - ea) * kern)) / (3.0 * math.pi)
+        modmax = float(max(np.max(np.abs(eb)), np.max(np.abs(phi))))
+    else:
+        # ETDRK4 at its stability step count was correct in every measured case
+        # (H = 0.02 and 0.12, u to 1200, 30 d to 1 y); one solve plus the
+        # invariant. `steps` only ever raises M, when a refinement asks for it.
+        M = max(int(math.ceil(steps_mult * ETDRK4_MARGIN * m_stab)),
+                int(steps) if int(steps) > AUTO_EXPTRAP_STEPS else 0)
+        phi = _safe_exp(log_char_func(z, tau, p, N=N, steps=M, scheme=scheme))
+        err_price = 0.0
+        modmax = float(np.max(np.abs(phi)))
+    # The truncated mass is bounded by the integrand AT the cut-off. With
+    # doubling panels the last panel starts at u_max / 2, so reading all 64 of
+    # its nodes -- as the uniform-grid version did -- sees values from halfway
+    # in and extends the range for nothing (measured: 6 needless extensions
+    # across ten expiries at the true parameters).
+    tail = float(np.max(np.abs(phi[-8:]) * kern[-8:]))
+    dens = phi * kern
+    ks = np.atleast_1d(np.asarray(ks, dtype=float))
+    prices = 1.0 - np.exp(0.5 * ks) / math.pi * fo._real_transform(ks, v, dens, w)
+    ok = (np.all(np.isfinite(prices)) and modmax <= 1.0 + PHI_BOUND_TOL
+          and err_price <= tol_price)
+    return prices, {"scheme": scheme, "steps": M, "err_price": err_price,
+                    "phi_max": modmax, "tail": tail, "ok": bool(ok),
+                    "u_max": u_max, "n_panels": n_panels, "n_nodes": len(v)}
+
+
+def lewis_prices(ks, tau, p, tol=1e-9, tol_price=1e-6, N=N_DEFAULT, max_refine=3,
+                 max_extend=3, u_max=None, steps_mult=1.0):
+    """
+    Undiscounted call values (units of F) for a strip of log-moneyness, on the
+    Lewis contour Im u = -1/2, with the quadrature range and the ODE step count
+    both CHECKED rather than trusted. Returns (prices, info).
+
+    Why Lewis and not Carr-Madan for this model. Carr-Madan with damping alpha
+    evaluates phi on Im u = -(1 + alpha), which needs E[S^(1+alpha)] < inf; for
+    rough and vanilla Heston that moment explodes in finite time when vol-of-vol
+    is high relative to mean reversion and correlation, and a calibration WILL
+    walk there -- it did, to (xi, rho, kappa) = (0.63, -0.56, 0.19), where the
+    Heston discriminant for p = 2.5 is -0.36. Lewis needs only E[S^(1/2)], which
+    is finite for every martingale model, and it makes |phi| <= 1 a hard check.
+    The two agree to 2.5e-13 in price where both are valid.
+
+    Refinement: if the invariant or the step-halving error fails, the step count
+    doubles (up to max_refine times); if the u-tail has not decayed below `tol`,
+    the range grows 1.5x (up to max_extend times). If a pass still fails, the
+    prices come back NaN and info['ok'] is False: the caller is told the model
+    could not be priced there, instead of being handed a number.
+    """
     ks = np.atleast_1d(np.asarray(ks, dtype=float))
     k_abs = float(np.max(np.abs(ks))) if ks.size else 0.0
-    um = u_max_for(p, tau, tol)
-    extended = 0
+    um = u_max_for(p, tau, tol) if u_max is None else float(u_max)
+    steps = AUTO_EXPTRAP_STEPS
+    refined = extended = 0
     while True:
-        npan = n_panels_for(um, k_abs)
-        v, w = fo._composite_gl(0.0, um, npan)
-        phi = char_func(v - (alpha + 1.0) * 1j, tau, p, N=N, **kw)
-        denom = alpha * alpha + alpha - v * v + 1j * (2.0 * alpha + 1.0) * v
-        psi = phi / denom
-        tail = float(np.max(np.abs(psi[-64:])))
-        if tail < tol or extended >= max_extend:
-            break
-        um *= 1.5
-        extended += 1
-    prices = np.exp(-alpha * ks) / math.pi * fo._real_transform(ks, v, psi, w)
-    return prices, {"u_max": um, "n_panels": npan, "n_nodes": len(v),
-                    "tail": tail, "extended": extended}
-
-
-def carr_madan_rough(ks, tau, cf, tol=1e-9, **kw):
-    """
-    Drop-in `pricer` for calibrate.objective.model_ivs: same signature as
-    pricing.fourier.carr_madan_call but sizes and checks its own quadrature
-    from `cf.params` (set by cf_factory). `tol` is the tail tolerance here,
-    not a quadrature tolerance.
-    """
-    p = getattr(cf, "params", None)
-    if p is None:
-        raise TypeError("carr_madan_rough needs a cf built by rough_heston.cf_factory")
-    prices, _ = call_prices(ks, tau, p, tol=tol, **kw)
-    return prices if prices.size > 1 else float(prices[0])
+        prices, info = _lewis_solve(ks, tau, p, um, n_panels_for(um, k_abs), N, steps, tol_price,
+                                    steps_mult)
+        bad_solve = (info["phi_max"] > 1.0 + PHI_BOUND_TOL or info["err_price"] > tol_price
+                     or not np.all(np.isfinite(prices)))
+        if bad_solve and refined < max_refine:
+            steps = 2 * info["steps"]
+            refined += 1
+            continue
+        if not bad_solve and info["tail"] > tol and extended < max_extend:
+            um *= 1.5
+            extended += 1
+            continue
+        break
+    info.update(refined=refined, extended=extended)
+    if not info["ok"]:
+        prices = np.full(ks.shape, np.nan)
+    return prices, info
 
 
 class RoughPricer:
     """
-    The pricer to hand a CALIBRATION: same call signature as carr_madan_rough,
-    but the quadrature grid for each maturity is sized once, on first use, and
-    then frozen.
+    The pricer to hand a CALIBRATION: the signature of pricing.fourier's pricers
+    (ks, tau, cf, tol) with `cf` built by rough_heston.cf_factory, pricing on the
+    Lewis contour with every solve checked (see lewis_prices).
 
-    Two reasons. Speed: sizing means a tail check, and a failed check means a
-    second Riccati solve; done once per maturity instead of once per objective
-    evaluation. Smoothness: an optimiser differentiates the objective by finite
-    differences, and a grid that re-sizes itself as the parameters move puts a
-    1e-9 kink under every step. The grid is sized with a margin (`widen`) from
-    the starting parameters; the tail is still checked on every call and the
-    grid re-sized if the parameters have wandered somewhere fatter-tailed, so
-    the freeze is a default, not a promise. `stats` records what happened.
+    The u-range for each maturity is sized once, on first use, with a margin,
+    and then frozen. Speed: sizing means a tail check, and a failed check means
+    a second Riccati solve. Smoothness: an optimiser differentiates the
+    objective by finite differences, and a grid that re-sizes itself as the
+    parameters move puts a kink under every step. The tail is still checked on
+    every call and the frozen range grows if the parameters have wandered
+    somewhere fatter-tailed, so the freeze is a default, not a promise.
+    `stats` records what happened, including how many strips came back
+    unpriceable -- which the objective turns into a penalty, never a zero.
     """
 
-    def __init__(self, tol=1e-9, alpha=1.5, N=N_DEFAULT, widen=1.25, **cf_kw):
-        self.tol, self.alpha, self.N, self.widen, self.cf_kw = tol, alpha, N, widen, cf_kw
+    def __init__(self, tol=1e-9, tol_price=1e-6, N=N_DEFAULT, widen=1.25, **_ignored):
+        self.tol, self.tol_price, self.N, self.widen = tol, tol_price, N, widen
         self.grids = {}
-        self.stats = {"solves": 0, "resizes": 0}
+        self.stats = {"solves": 0, "refined": 0, "extended": 0, "failed_strips": 0}
 
     def __call__(self, ks, tau, cf, tol=None):
-        import pricing.fourier as fo
-
         p = getattr(cf, "params", None)
         if p is None:
             raise TypeError("RoughPricer needs a cf built by rough_heston.cf_factory")
-        tol = self.tol if tol is None else tol
         ks = np.atleast_1d(np.asarray(ks, dtype=float))
-        k_abs = float(np.max(np.abs(ks))) if ks.size else 0.0
         key = round(float(tau), 12)
         if key not in self.grids:
-            um = self.widen * u_max_for(p, tau, tol)
-            self.grids[key] = (um, n_panels_for(um, k_abs))
-        for _ in range(4):
-            um, npan = self.grids[key]
-            v, w = fo._composite_gl(0.0, um, npan)
-            phi = cf(v - (self.alpha + 1.0) * 1j)
-            self.stats["solves"] += 1
-            denom = (self.alpha * self.alpha + self.alpha - v * v
-                     + 1j * (2.0 * self.alpha + 1.0) * v)
-            psi = phi / denom
-            if float(np.max(np.abs(psi[-64:]))) < tol:
-                break
-            um *= 1.5
-            self.grids[key] = (um, n_panels_for(um, k_abs))
-            self.stats["resizes"] += 1
-        prices = np.exp(-self.alpha * ks) / math.pi * fo._real_transform(ks, v, psi, w)
+            self.grids[key] = self.widen * u_max_for(p, tau, self.tol)
+        prices, info = lewis_prices(ks, tau, p, tol=self.tol, tol_price=self.tol_price,
+                                    N=getattr(cf, "N", self.N), u_max=self.grids[key])
+        self.grids[key] = max(self.grids[key], info["u_max"])
+        self.stats["solves"] += 1 + info["refined"] + info["extended"]
+        self.stats["refined"] += info["refined"]
+        self.stats["extended"] += info["extended"]
+        if not info["ok"]:
+            self.stats["failed_strips"] += 1
         return prices if prices.size > 1 else float(prices[0])

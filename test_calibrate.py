@@ -293,6 +293,51 @@ def test_identifiability_mechanism():
           "the process has relaxed")
 
 
+def test_failure_is_never_cheaper():
+    """
+    The objective's handling of quotes the model cannot price. A rough Heston
+    calibration exploited the old convention (every unpriceable quote
+    contributed zero): it walked to parameters where two whole maturities
+    failed and the cost FELL. A model failure must cost at least as much as the
+    worst priceable outcome.
+    """
+    print("\nC1 -- a quote the model fails on is charged, never zeroed")
+    from calibrate.objective import FAILURE_IV, MODEL_FAILURE, BELOW_RESOLUTION, model_ivs
+
+    S = build_surface(FAST_TAUS)
+    good, _ = residuals(TRUE, S, heston_cf_factory)
+
+    def broken_pricer(ks, tau, cf, tol=None):
+        out = np.atleast_1d(fo.carr_madan_call(ks, tau, cf, tol=tol))
+        if abs(tau - FAST_TAUS[1]) < 1e-12:
+            return np.full_like(out, 1.9e18)          # what the runaway returned
+        return out
+
+    r, failed = residuals(TRUE, S, heston_cf_factory, pricer=broken_pricer)
+    idx = S.by_expiry[1][1]
+    check("a broken maturity is counted as failed", failed == len(idx), f"{failed} of {len(S)}")
+    check("...and is charged at the inversion ceiling, not zero",
+          np.allclose(r[idx], np.sqrt(S.weight[idx]) * (FAILURE_IV - S.iv[idx])),
+          f"min charge {float(np.min(np.abs(r[idx]))):.3f}")
+    check("failing makes the cost HIGHER than fitting exactly", float(r @ r) > float(good @ good) + 1.0,
+          f"{float(r @ r):.2e} vs {float(good @ good):.2e}")
+    worst_priceable = np.sqrt(S.weight[idx]) * np.maximum(FAILURE_IV - S.iv[idx], S.iv[idx] - 1e-4)
+    check("the charge is at least the worst priceable miss for every quote",
+          np.all(np.abs(r[idx]) >= worst_priceable - 1e-12))
+
+    _, _, status = model_ivs(TRUE, S, heston_cf_factory, pricer=broken_pricer, return_status=True)
+    check("status marks the broken strip MODEL_FAILURE and the rest OK",
+          np.all(status[idx] == MODEL_FAILURE) and np.all(np.delete(status, idx) == 0))
+
+    # A deep quote where BOTH the market and the model are below resolution:
+    # genuinely no information, still zero (the original, correct, case).
+    S2 = MarketSurface(np.array([0.25]), np.array([25.0]), np.array([0.20]), np.array([1.0]))
+    r2, f2 = residuals(TRUE, S2, heston_cf_factory)
+    _, _, st2 = model_ivs(TRUE, S2, heston_cf_factory, return_status=True)
+    check("market and model both below resolution -> no information -> 0",
+          f2 == 1 and r2[0] == 0.0 and st2[0] == BELOW_RESOLUTION, f"r = {r2[0]}, status {st2[0]}")
+
+
 def test_tikhonov_prior():
     """
     The regularised answer to the identifiability finding. A prior on kappa
@@ -382,6 +427,7 @@ if __name__ == "__main__":
     test_lm_driver()
     test_transform()
     test_objective()
+    test_failure_is_never_cheaper()
     test_clean_recovery()
     test_multistart()
     test_identifiability()

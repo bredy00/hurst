@@ -12,15 +12,22 @@ fit/svi.py                            raw SVI slice fitting, scipy-free
 sources/replay.py                     JSON record / replay of a chain snapshot
 models/heston.py                      Heston cf (Albrecher branch) + MC
 pricing/fourier.py                    Lewis + Carr-Madan, adaptive composite quadrature
-calibrate/objective.py                vega-weighted implied-vol loss
-calibrate/fit.py                      Levenberg-Marquardt, generic over the model
+models/rough_heston.py                lifted rough Heston: kernel, lift, Riccati cf, Lewis pricer
+calibrate/objective.py                implied-vol loss; model failure is charged, never zeroed
+calibrate/fit.py                      Levenberg-Marquardt, generic over the model; Tikhonov prior
 capture_v2.py / capture_v3.py         stand-in feeds + comparison images
-test_core.py                          87 checks   (the maths)
+capture_rough_vs_heston.py            Phase 2 headline: both models, in-model + stylised market
+study_h_identifiability.py            Gauss-Newton standard error of H by surface design
+debug_fbm_helper.py                   the Session A fBm fixture bug, reproduced
+debug_fd_methods.py                   which 2nd-derivative stencil holds order on real grids
+test_core.py                         103 checks   (the maths)
 test_fixes.py                         47 checks   (IBKR runtime behaviour)
 test_surface.py                       45 checks   (audit, SVI, density, replay)
-test_models.py                        20 checks   (Heston cf)
+test_models.py                        25 checks   (Heston cf)
 test_pricing.py                       29 checks   (Fourier pricers)
-test_calibrate.py                     46 checks   (objective, LM, identifiability)
+test_calibrate.py                     65 checks   (objective, LM, identifiability, prior)
+test_rough.py                         58 checks   (Session D: kernel, lift, cf, robustness)
+test_rough_calibration.py             27 checks   (Session E: calibration, H, skew)
 docs/superpowers/plans/               the six-session rough Heston plan
 captures/                             frames, GIFs, comparisons, snapshot.json
 .venv/                                python 3.12.3
@@ -32,7 +39,10 @@ captures/                             frames, GIFs, comparisons, snapshot.json
 .venv/Scripts/python.exe test_surface.py  # 45 passed
 .venv/Scripts/python.exe test_models.py   # 20 passed
 .venv/Scripts/python.exe test_pricing.py  # 29 passed
-.venv/Scripts/python.exe test_calibrate.py # 46 passed
+.venv/Scripts/python.exe test_calibrate.py # 65 passed
+.venv/Scripts/python.exe test_rough.py     # 58 passed
+.venv/Scripts/python.exe test_rough_calibration.py  # 27 passed, ~4 min
+.venv/Scripts/python.exe capture_rough_vs_heston.py # Phase 2 headline, ~6 min
 .venv/Scripts/python.exe capture_heston.py      # Heston's own skew term structure
 .venv/Scripts/python.exe capture_calibration.py # Phase 1 baseline vs a rough surface
 .venv/Scripts/python.exe capture_v3.py    # re-render + end-to-end validation
@@ -279,9 +289,125 @@ Note the short end is not optional: a grid starting at 7 days lets Heston fit a
 **274 tests green**: core 87, fixes 47, surface 45, models 20, pricing 29,
 calibrate 46.
 
+## Analytics review (2026-09-12)
+
+| item | done |
+|---|---|
+| Heston cf as ξ → 0 | `(a−d)(a+d) = −ξ²(u²+iu)` makes `(a−d)/ξ²` exact; the log term is `log1p` of an O(ξ²) quantity, Taylor series below ξ = 1e-4. Machine precision (2e-16) at ξ = 1e-8…1e-12 where the literal form is 19%–100% wrong; `char_func_naive` kept to prove it |
+| `fd_second` on non-uniform grids | the coordinate-map proposal was implemented and **measured** (`debug_fd_methods.py`): order **0.01** on a $1/$5 kinked grid, negative on random spacing, because its differenced metric is O(1) wrong at a kink; on smooth grids the plain stencil is already O(h²). Shipped instead: Fornberg 5-point, order **3.06** on the kink. Breeden-Litzenberger error 7.9e-8 → 5.3e-12. The 2.08e-11 on the old check was rounding (floor 5.1e-11), not truncation |
+| density non-negativity | `density_for_sampling`: floor at ε, renormalise to one, report the removed mass. The raw density stays raw — its sign is the arbitrage signal |
+| κ identifiability | threshold not tightened. `calibrate(..., prior=, prior_weight=)` Tikhonov rows, reported as `prior_cost` separately from `data_cost`; κ spread 34.7% → 0.07%; `kappa_from_variance_swap` for the external pin |
+| trend monitoring | `healthcheck.py --trend`: history per run, mean / std / drift z per check, Jacobian condition median < 100 and spike > 1e4 rules |
+| fBm fixture bug | debugged once, `docs/fbm_helper_bug.md`: the point-sampled kernel capped the singular `(t−s)^(H−½)` at 1 for the newest shock; lag-1 autocorrelation −0.18 instead of −0.41; exact treatment of the first cell (hybrid scheme κ = 1) recovers 0.1207 |
+
+## Session D (2026-09-12) -- the Markovian lift
+
+`models/rough_heston.py`. Rough Heston written with Heston's own parameters, so
+H = ½ **is** vanilla Heston.
+
+| | |
+|---|---|
+| **D1** | `K(t) = t^(α−1)/Γ(α)` and its measure `μ(dx) = x^(−α)/(Γ(α)Γ(1−α))dx`; representation verified to 6.7e-10 |
+| **D2** | N = 24 nodes by cell mass / cell mean of μ, first cell from **zero** (keeps the long memory), geometric to 1e5: **0.87%** on [1 hour, 2 years]. The published `r_n = 1 + 10n^−0.9` rule measured 27%. The plan's Laplace criterion (<1% on z ∈ [0.1, 100]) is **not met**, 3.5%: z = 0.1 probes ten years of memory |
+| **D3** | the lifted recursion equals the convolution with the same kernel to 5e-14 (a semigroup identity, checked); against the true-kernel Volterra path from the same Brownian increments, **0.80%** in L² |
+| **D4** | cf from the N-factor Riccati system. N = 1 at x = 0 reproduces closed-form Heston to 6e-11; the full lift converges to Heston **linearly in ½ − H** (1.6e-3, 1.6e-4, 1.6e-5 at H = 0.49, 0.499, 0.4999); lifted Monte Carlo agrees with the lifted cf at \|z\| < 0.4 |
+
+Two time-steppers, ETDRK4 (order 4.0 measured) and an implicit exponential
+trapezoidal rule whose implicit equation is a scalar quadratic per u.
+
+## Session E (2026-09-12/13) -- calibration, and the comparison that matters
+
+**E1.** The same Levenberg-Marquardt driver fits (v0, κ, θ, ξ, ρ, H). Clean
+data, start 25–100% off in every parameter: all six recovered to **0.0015%**,
+H = 0.120001, 30 s.
+
+**The first E run failed 6 of 16 checks, and the failures were real bugs.**
+
+- **Moment explosion.** Carr-Madan at α = 1.5 needs E[S^2.5] < ∞. The fit
+  walked to (ξ, ρ, κ) = (0.63, −0.56, 0.19), where the Heston discriminant for
+  p = 2.5 is −0.36, and the pricer returned **1.9e18** and **2.9e28**. The rough
+  pricer now uses the **Lewis** contour, which needs only E[S^½] — finite for
+  every martingale model — and makes `|φ(u − i/2)| ≤ 1` a hard check on every
+  solve.
+- **The objective rewarded failure.** Unpriceable quotes contributed exactly
+  zero, so blowing up two maturities *lowered* the cost: that is how the fit
+  ran to H = 0.02, θ = 0.88. A model failure is now charged at the inversion
+  ceiling (500% vol), which no priceable outcome can exceed.
+- **The implicit scheme is not unconditionally stable.** Session D's docstring
+  said it was, on tests that only probed each maturity's pricing range. At
+  u = 1200, H = 0.12, 90 days, 120 steps return |φ| = **1.2e36**. Stability
+  edges measured for both schemes (z ≈ 2.65 and 15–25); step counts sized from
+  them; an M-vs-2M error estimate refines a solve that is unstable.
+- **The capture aliased missing maturities.** Model curves were aligned to the
+  market by nearest neighbour, so a maturity the model failed on printed as a
+  copy of its neighbour (−1.2574 at 14, 30, 60, 90 days), and `zip` dropped
+  rows from a shorter report. Everything is keyed by maturity now; missing is a
+  dash.
+
+Speed, after all of that: OpenBLAS spent ~1.3 ms per ODE step starting threads
+for 24×n matrix products — einsum below 1000 nodes, one pre-stacked real @
+complex product for the update — and the u-grid became doubling panels
+(2176 → 640 nodes at one day). **Ten-expiry objective 6.3 s → 1.06 s** with every
+solve checked; worst IV error against a brute-force reference 1.3e-3 vol points.
+
+**Identifiability of H**, measured (`study_h_identifiability.py`), not assumed:
+
+| surface | weighting | SE(H) |
+|---|---|---|
+| 4 expiries × 5 strikes | vega² from a price half-spread, 0.5 vp noise | **0.202** (2.3 effective quotes of 20) |
+| same | equal in vol | 0.047 |
+| 8 × 7 with a real short end | vega², consistent noise, realistic spread | 0.020 |
+
+Under vega² weights the short end — where H lives — carries no weight, and
+three noisy seeds gave H = 0.50 / 0.25 / 0.12 with the optimiser beating the
+truth's cost in all three: the data did not contain H. **corr(H, ξ) = +0.98**,
+the rough analogue of Session C's κ/θ. With equal weights: H = 0.114, 0.100,
+0.125.
+
+**E2 — the comparison, on a market generated by rough Heston (H = 0.12)**, 8
+maturities × 7 strikes, both models fitted by the same driver with equal weights
+(`capture_rough_vs_heston.py`; `test_rough_calibration.py` asserts the same on a
+30-quote surface):
+
+| | market | rough Heston | vanilla Heston |
+|---|---|---|---|
+| fit rmse | — | **0.000 vp** (all 6 parameters exact) | 0.76 vp (κ = 35.6, ξ = 3.93) |
+| fitted H | 0.12 | **0.1200** | — |
+| one-day ATM skew | −4.84 | −4.84 (100%) | −3.66 (76%) |
+| log-log slope, 1–3 days | −0.441 | −0.441 | **−0.123** |
+| log-log slope, 7–14 days | −0.512 | −0.512 | −0.525 |
+
+Vanilla Heston matches the market at 7–14 days — by pushing 1/κ to about ten
+days so its transition from flat to decaying sits inside the window — and
+**cannot follow below a week**, where a diffusion's skew must go flat. The slope
+over the whole 1–14 day window hides this (−0.32 vs −0.47); the bend does not.
+Note the market's own slope is −0.47, not H − ½ = −0.38: the τ^(H−½) law is
+asymptotic, and at ξ = 0.5 the higher-order vol-of-vol term steepens it (−0.42
+at ξ = 0.05).
+
+**The stylised Phase 1 surface does not discriminate.** Fitted with equal
+weights, rough Heston goes to **H = 0.5** — vanilla Heston — from all four
+starts tried (H = 0.08, 0.12, 0.20, 0.25; costs equal to 3e-4), and both models
+sit at 2.10 vp. That surface has too
+little smile curvature for its skew to be any stochastic-volatility smile.
+Phase 1's "Heston delivers 58% of the one-day skew" was a consequence of the
+vega² weighting; with equal weights it delivers 201%. What survives is the
+misfit, not its sign. See `docs/phase1_baseline.md` and
+`docs/phase2_rough_vs_heston.md`.
+
+**399 tests green**: core 103, fixes 47, surface 45, models 25,
+pricing 29, calibrate 65, rough 58, rough calibration 27.
+Health checks 72 of 72.
+
 ## Still open
 
-eSSVI (a shared parameterisation that is calendar-arbitrage-free by construction;
-`essvi_calendar_ok` currently measures the violation rather than preventing it);
-Kalman smoothing of the fitted parameters; then Sessions B-F in
-`docs/superpowers/plans/2026-09-07-rough-heston-pipeline.md`.
+- **Session F** — Hawkes jump arrivals and the (dual) Kalman filter, each applied
+  to three hosts: the OU intensity model, classical Heston and the lifted rough
+  Heston (scope corrected 2026-09-12; the lifted factors `U_i` are what make a
+  Kalman filter applicable to the rough model).
+- eSSVI (calendar-arbitrage-free by construction; `essvi_calendar_ok` measures
+  but does not prevent).
+- The live IBKR path has still never run against a real TWS.
+- `volatility_surface_3.py` (963 lines) should be split; no pytest / CI.
+- A rough fit is ~1 s per ten-expiry objective evaluation: fine for a study,
+  slow for a live recalibration loop.

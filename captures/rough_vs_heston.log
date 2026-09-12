@@ -1,0 +1,90 @@
+in-model market built in 1s
+
+=== IN-MODEL market (rough Heston, H = 0.12): 56 quotes, 8 expiries ===
+  Heston : rmse 0.760 vp  (15s)  v0=0.0385  kappa=35.6491  theta=0.0437  xi=3.9287  rho=-0.7169
+     it  1 cost 9.9118e-04 lam 3.3e-04
+     it  2 cost 1.6909e-04 lam 1.1e-04
+     it  3 cost 2.0772e-07 lam 3.7e-05
+     it  4 cost 2.5175e-11 lam 1.2e-05
+     it  5 cost 2.3318e-11 lam 4.1e-06
+     it  6 cost 2.3318e-11 lam 1.4e-06
+     it  7 cost 2.3318e-11 lam 1.2e-04
+     it  8 cost 2.3318e-11 lam 3.9e-05
+     it  9 cost 2.3318e-11 lam 2.1e-01
+     it 10 cost 2.3318e-11 lam 2.8e-01
+     it 11 cost 2.3318e-11 lam 6.1e+00
+  rough  : rmse 0.000 vp  (94s, 11 it, xtol)  v0=0.0400  kappa=2.0001  theta=0.0450  xi=0.5000  rho=-0.7000  H=0.1200
+           pricer {'solves': 752, 'refined': 0, 'extended': 0, 'failed_strips': 0}; kernel error at fitted H 0.87%
+
+   tau(d)  Heston rmse  rough rmse   (vol points)
+        1        1.054       0.000
+        2        0.419       0.000
+        3        0.204       0.000
+        7        0.676       0.000
+       14        0.894       0.000
+       30        0.799       0.000
+       90        0.396       0.000
+      365        1.116       0.000
+
+   tau(d)    market    Heston     rough   H/mkt   R/mkt
+        1   -4.8414   -3.6567   -4.8414   0.755   1.000
+        2   -3.5830   -3.4768   -3.5830   0.970   1.000
+        3   -2.9839   -3.1942   -2.9839   1.070   1.000
+        5   -2.3491   -2.6854   -2.3491   1.143   1.000
+        7   -1.9944   -2.3141   -1.9944   1.160   1.000
+       10   -1.6667   -1.9336   -1.6667   1.160   1.000
+       14   -1.3989   -1.6087   -1.3989   1.150   1.000
+       30   -0.9239   -1.0282   -0.9239   1.113   1.000
+       60   -0.6268   -0.6646   -0.6268   1.060   1.000
+       90   -0.4983   -0.5047   -0.4983   1.013   1.000
+      180   -0.3311   -0.2992   -0.3311   0.904   1.000
+      365   -0.2098   -0.1641   -0.2098   0.782   1.000
+  short-end (<= 14 d) log-log slope: market -0.470  Heston -0.319  rough -0.470   (H - 1/2 = -0.380)
+  local slopes 1-3 d / 7-14 d: market -0.441 / -0.512  Heston -0.123 / -0.525  rough -0.441 / -0.512
+
+=== STYLISED market (Phase 1 surface, H = 0.12): 56 quotes, 8 expiries ===
+  Heston : rmse 2.104 vp  (45s)  v0=0.0203  kappa=10.8879  theta=0.0941  xi=3.7985  rho=-0.8176
+     it  1 cost 1.2877e-01 lam 3.3e-04
+     it  2 cost 2.8237e-02 lam 1.1e-04
+     it  3 cost 2.6470e-02 lam 3.7e-05
+     it  4 cost 2.4951e-02 lam 1.2e-05
+     it  5 cost 2.4815e-02 lam 4.1e-06
+     it  6 cost 2.4791e-02 lam 1.4e-06
+     it  7 cost 2.4786e-02 lam 4.6e-07
+     it  8 cost 2.4785e-02 lam 1.5e-07
+     it  9 cost 2.4784e-02 lam 5.1e-08
+     it 10 cost 2.4784e-02 lam 1.7e-08
+     it 11 cost 2.4784e-02 lam 5.6e-09
+     it 12 cost 2.4784e-02 lam 1.9e-09
+     it 13 cost 2.4784e-02 lam 6.9e+02
+  rough  : rmse 2.104 vp  (40s, 13 it, ftol)  v0=0.0203  kappa=10.8928  theta=0.0941  xi=3.8001  rho=-0.8176  H=0.5000
+           pricer {'solves': 914, 'refined': 0, 'extended': 10, 'failed_strips': 0}; kernel error at fitted H 0.00%
+
+   tau(d)  Heston rmse  rough rmse   (vol points)
+        1        1.745       1.745
+        2        1.593       1.593
+        3        1.527       1.527
+        7        1.528       1.528
+       14        1.780       1.780
+       30        2.211       2.211
+       90        2.174       2.174
+      365        3.517       3.517
+
+   tau(d)    market    Heston     rough   H/mkt   R/mkt
+        1   -2.7232   -5.4775   -5.4796   2.011   2.012
+        2   -2.0926   -4.7554   -4.7564   2.272   2.273
+        3   -1.7938   -4.1235   -4.1241   2.299   2.299
+        5   -1.4773   -3.2889   -3.2892   2.226   2.226
+        7   -1.3000   -2.7850   -2.7851   2.142   2.142
+       10   -1.1352   -2.3191   -2.3192   2.043   2.043
+       14   -0.9990   -1.9490   -1.9491   1.951   1.951
+       30   -0.7478   -1.3301   -1.3302   1.779   1.779
+       60   -0.5746   -0.9556   -0.9557   1.663   1.663
+       90   -0.4926   -0.7828   -0.7829   1.589   1.589
+      180   -0.3785   -0.5285   -0.5285   1.396   1.396
+      365   -0.2893   -0.3228   -0.3228   1.116   1.116
+  short-end (<= 14 d) log-log slope: market -0.380  Heston -0.404  rough -0.404   (H - 1/2 = -0.380)
+  local slopes 1-3 d / 7-14 d: market -0.380 / -0.380  Heston -0.258 / -0.515  rough -0.259 / -0.515
+
+  figure -> C:\Projects\volatility-surface-tuning\captures\rough_vs_heston.png
+  record -> C:\Projects\volatility-surface-tuning\docs\phase2_rough_vs_heston.md

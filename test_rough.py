@@ -271,10 +271,11 @@ def test_cf_properties():
     # 'auto' picks the cheap scheme
     um1 = rh.u_max_for(P, 1 / 365)
     um365 = rh.u_max_for(P, 1.0)
-    check("auto: ETDRK4 at one day, implicit at one year (stability step count decides)",
-          rh.stability_steps(1 / 365, um1, P) <= rh.AUTO_ETDRK4_MAX_STEPS
-          < rh.stability_steps(1.0, um365, P),
-          f"{rh.stability_steps(1/365, um1, P)} vs {rh.stability_steps(1.0, um365, P)} steps")
+    s1, m1 = rh.choose_scheme(1 / 365, um1, P)
+    s365, m365 = rh.choose_scheme(1.0, um365, P)
+    check("auto: ETDRK4 at one day, implicit at one year (cost at stable step count decides)",
+          s1 == "etdrk4" and s365 == "exptrap",
+          f"1 d: {s1} x {m1} steps;  1 y: {s365} x {m365} (+2x for Richardson)")
 
     # phi-functions: series and direct branches agree at the switch
     c = np.array([-0.0999, -0.1001, -0.5, -5.0, -1e-6])
@@ -288,35 +289,105 @@ def test_cf_properties():
 
 
 def test_pricing_wrapper():
-    print("\nD4 -- call_prices: self-sized, self-checked quadrature")
+    print("\nD4 -- call_prices: Lewis contour, self-sized and self-checked")
+    import models.rough_heston as rhm
     for d_ in (1, 30, 365):
         tau = d_ / 365
         band = 3 * 0.2 * math.sqrt(tau)
         ks = np.linspace(-band, band, 9)
         c, info = rh.call_prices(ks, tau, P)
-        ref = np.array(fo.carr_madan_call(ks, tau, rh.cf_factory(P, tau),
-                                          u_max=info["u_max"], n_panels=info["n_panels"]))
-        check(f"{d_:3d}d: matches pricing.fourier.carr_madan_call at the same settings",
-              float(np.max(np.abs(c - ref))) < 1e-12, f"{float(np.max(np.abs(c - ref))):.1e}")
-        check(f"{d_:3d}d: tail below tolerance after {info['extended']} extension(s)",
-              info["tail"] < 1e-9, f"tail {info['tail']:.1e}, u_max {info['u_max']:.0f}, "
-                                   f"{info['n_nodes']} nodes")
+        # Independent reference: the generic uniform-grid Lewis pricer, twice
+        # the range, twice the panels, ETDRK4 at three times its stable steps.
+        um = 2.0 * info["u_max"]
+        cf = rh.cf_factory(P, tau, scheme="etdrk4", steps_mult=3.0)
+        ref = np.asarray(fo.lewis_call(ks, tau, cf, u_max=um,
+                                       n_panels=2 * rh.n_panels_for(um, band)))
+        iv, iv_ref = fo.implied_vols_from_calls(c, ks, tau), fo.implied_vols_from_calls(ref, ks, tau)
+        e = float(np.nanmax(np.abs(iv - iv_ref)))
+        check(f"{d_:3d}d: agrees with an independent brute-force Lewis price to 0.005 vol points",
+              e < 5e-5, f"max |IV diff| {e*100:.1e} vp; {info['scheme']} x {info['steps']}, "
+                        f"{info['n_nodes']} u-nodes")
+        check(f"{d_:3d}d: every solve checked -- ok, tail below tolerance, |phi(u - i/2)| <= 1",
+              info["ok"] and info["tail"] < 1e-9 and info["phi_max"] <= 1.0 + 1e-6,
+              f"tail {info['tail']:.1e}, max |phi| {info['phi_max']:.6f}")
         intrinsic = np.maximum(1.0 - np.exp(ks), 0.0)
         check(f"{d_:3d}d: prices decreasing in k and inside the no-arbitrage band",
               np.all(np.diff(c) < 0) and np.all(c > intrinsic) and np.all(c < 1.0))
-        iv = fo.implied_vols_from_calls(c, ks, tau)
-        check(f"{d_:3d}d: implied vols invert and are finite", np.all(np.isfinite(iv)),
-              f"atm {iv[4]:.4f}, skew sign {'neg' if iv[-1] < iv[0] else 'POS'}")
 
-    # A tolerance the envelope cannot meet must trigger an extension, not a wrong price
     _, tight = rh.call_prices(np.array([0.0]), 7 / 365, P, tol=1e-13)
     check("a tight tail tolerance triggers range extension",
           tight["extended"] >= 1, f"extended {tight['extended']}x to u_max {tight['u_max']:.0f}")
 
-    # The calibrator's pricer entry point
-    cf = rh.cf_factory(P, 0.25)
-    pr = rh.carr_madan_rough(np.array([-0.1, 0.0, 0.1]), 0.25, cf)
-    check("carr_madan_rough prices through cf.params", pr.shape == (3,) and np.all(np.isfinite(pr)))
+    pricer = rh.RoughPricer()
+    pr = pricer(np.array([-0.1, 0.0, 0.1]), 0.25, rh.cf_factory(P, 0.25))
+    check("RoughPricer prices through cf.params and keeps statistics",
+          pr.shape == (3,) and np.all(np.isfinite(pr)) and pricer.stats["solves"] >= 1,
+          f"{pricer.stats}")
+
+
+def test_solver_robustness():
+    """
+    The three failures a Session E calibration found, each pinned down.
+
+    1. The implicit scheme is NOT unconditionally stable (an earlier docstring
+       said it was). Demonstrated, and the stability-sized step count shown to
+       fix it for both schemes out to u = 1200.
+    2. A solve that is under-stepped is CAUGHT by the checks and refined, rather
+       than returned.
+    3. At the parameters the calibration ran away to, the old Carr-Madan pricer
+       returned 1e18; the Lewis pricer returns valid prices.
+    """
+    print("\nE0 -- solver robustness (found by the Session E calibration)")
+    u = np.linspace(0.0, 1200.0, 1200) - 0.5j
+    tau = 90 / 365
+    bad = float(np.max(np.abs(rh.char_func(u, tau, P, scheme="exptrap", steps=120))))
+    check("exptrap at 120 steps blows up at u = 1200, 90 d, H = 0.12 -- NOT unconditionally stable",
+          bad > 1e3, f"max |phi(u - i/2)| = {bad:.1e}, must be <= 1")
+    worst = 0.0
+    for q in (P, rh.RoughHestonParams(0.02, 0.1868, 0.8828, 0.6347, -0.5574, 0.02)):
+        for d_ in (30, 90):
+            t = d_ / 365
+            m_t = max(rh.AUTO_EXPTRAP_STEPS, rh.stability_steps(t, 1200.0, q, scheme="exptrap"))
+            worst = max(worst, float(np.max(np.abs(rh.char_func(u, t, q, scheme="exptrap",
+                                                                steps=m_t)))))
+    check("stability-sized exptrap keeps |phi(u - i/2)| <= 1 to u = 1200 (H = 0.12 and 0.02)",
+          worst <= 1.0 + 1e-9, f"worst {worst:.6f}")
+
+    # 2. Force an unstable first pass by lying about the stability constant; the
+    #    invariant / step-halving checks must refuse it and refine.
+    saved = dict(rh.C_STAB)
+    try:
+        rh.C_STAB["exptrap"] = 1e4
+        rh.C_STAB["etdrk4"] = 1e4
+        ks = np.linspace(-0.3, 0.3, 7)
+        c, info = rh.lewis_prices(ks, 1.0, P, u_max=1200.0, max_extend=0)
+    finally:
+        rh.C_STAB.clear()
+        rh.C_STAB.update(saved)
+    ref, _ = rh.lewis_prices(ks, 1.0, P, u_max=1200.0, max_extend=0)
+    check("an under-stepped solve is caught and refined, not returned",
+          info["refined"] >= 1 and (not info["ok"] or float(np.max(np.abs(c - ref))) < 1e-7),
+          f"refined {info['refined']}x, ok={info['ok']}, "
+          f"max |price - reference| {float(np.nanmax(np.abs(c - ref))) if info['ok'] else float('nan'):.1e}")
+
+    # 3. The runaway parameters
+    run = rh.RoughHestonParams(0.0200, 0.1868, 0.8828, 0.6347, -0.5574, 0.0200)
+    lin = 2.5 * run.rho * run.xi - run.kappa
+    check("at the runaway parameters E[S^2.5] explodes (Heston discriminant < 0) -- Carr-Madan invalid",
+          lin * lin - run.xi ** 2 * 2.5 * 1.5 < 0, f"discriminant {lin * lin - run.xi ** 2 * 3.75:+.3f}")
+    ok_all = True
+    detail = []
+    for d_ in (30, 90, 180, 365):
+        t = d_ / 365
+        band = 3 * 0.2 * math.sqrt(t)
+        ks = np.linspace(-band, band, 9)
+        c, info = rh.call_prices(ks, t, run)
+        intrinsic = np.maximum(1.0 - np.exp(ks), 0.0)
+        good = info["ok"] and np.all((c > intrinsic) & (c < 1.0))
+        ok_all &= bool(good)
+        detail.append(f"{d_}d {'ok' if good else 'BAD'}")
+    check("...and the Lewis pricer returns in-band prices at 30, 90, 180 and 365 days",
+          ok_all, ", ".join(detail) + " (the Carr-Madan pricer returned 1.9e18 and 2.9e28 at 30 and 90)")
 
 
 def test_monte_carlo():
@@ -378,6 +449,7 @@ if __name__ == "__main__":
     test_h_to_half()
     test_cf_properties()
     test_pricing_wrapper()
+    test_solver_robustness()
     test_monte_carlo()
     print("\n" + "=" * 74)
     print(f"{len(PASS)} passed, {len(FAIL)} failed   ({time.perf_counter()-t0:.0f}s)")

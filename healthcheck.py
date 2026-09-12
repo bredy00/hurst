@@ -505,6 +505,71 @@ def h_lift():
            dt_obj < 3.0, unit="s", note="auto scheme; vanilla Heston is ~14 ms")
 
 
+# ------------------------------------------------------------- Session E
+def h_rough_robustness():
+    import models.rough_heston as rh
+    from calibrate.objective import FAILURE_IV, residuals, MarketSurface
+    Pr = rh.RoughHestonParams(0.04, 2.0, 0.045, 0.5, -0.7, 0.12)
+    run = rh.RoughHestonParams(0.0200, 0.1868, 0.8828, 0.6347, -0.5574, 0.0200)
+
+    u = np.linspace(0.0, 1200.0, 1200) - 0.5j
+    bad = float(np.max(np.abs(rh.char_func(u, 90 / 365, Pr, scheme="exptrap", steps=120))))
+    record("Rough robustness", "exptrap at 120 steps, u to 1200 (NOT unconditionally stable)", bad,
+           1.0, bad > 1.0, note="|phi(u - i/2)| must be <= 1; kept to prove the constraint")
+    m_t = max(rh.AUTO_EXPTRAP_STEPS, rh.stability_steps(90 / 365, 1200.0, Pr, scheme="exptrap"))
+    good = float(np.max(np.abs(rh.char_func(u, 90 / 365, Pr, scheme="exptrap", steps=m_t))))
+    record("Rough robustness", "stability-sized exptrap, same u range: max |phi(u - i/2)|", good,
+           1.0, good <= 1.0 + 1e-9, note=f"{m_t} steps")
+
+    worst = 0.0
+    n_ok = 0
+    for d_ in (30, 90, 180, 365):
+        tau = d_ / 365
+        band = 3 * 0.2 * math.sqrt(tau)
+        ks = np.linspace(-band, band, 9)
+        c, info = rh.call_prices(ks, tau, run)
+        intrinsic = np.maximum(1.0 - np.exp(ks), 0.0)
+        n_ok += int(info["ok"] and np.all((c > intrinsic) & (c < 1.0)))
+        worst = max(worst, info["phi_max"])
+    record("Rough robustness", "runaway parameters: maturities priced in-band (of 4)", n_ok, 4,
+           n_ok == 4, note="Carr-Madan returned 1.9e18 / 2.9e28 at 30 / 90 d here")
+
+    # The objective never rewards failure
+    tau = 60 / 365
+    ks = np.linspace(-0.1, 0.1, 5)
+    c, _ = rh.call_prices(ks, tau, Pr)
+    ivs = fo.implied_vols_from_calls(c, ks, tau)
+    S = MarketSurface(np.full(5, tau), ks, ivs, np.ones(5))
+    fac = lambda q, t: rh.cf_factory(q, t)
+    r_ok, _ = residuals(Pr, S, fac, pricer=rh.RoughPricer())
+    r_bad, nf = residuals(Pr, S, fac, pricer=lambda k, t, cf, tol=None: np.full(len(np.atleast_1d(k)), np.nan))
+    charge = float(np.min(np.abs(r_bad)))
+    record("Rough robustness", "unpriceable quote: minimum charge (vol) vs 0 before", charge,
+           FAILURE_IV - float(np.max(ivs)) - 1e-9, nf == 5 and charge >= FAILURE_IV - float(np.max(ivs)) - 1e-9,
+           note=f"exact fit costs {float(r_ok @ r_ok):.1e}")
+
+
+def h_identifiability_rough():
+    import models.rough_heston as rh
+    import study_h_identifiability as study
+    rows = study.quotes((2, 14, 90, 365), 5)
+    iv, J = study.jacobian(rows)
+    vega = np.array([float(vc.bs_vega(1.0, math.exp(k), v, t)) for (t, k), v in zip(rows, iv)])
+    homo = np.full(len(rows), 0.005 ** 2)
+    names = rh.RoughHestonParams.NAMES
+    jH, jxi = names.index("H"), names.index("xi")
+    cov_v = study.covariance(J, (vega / 0.005) ** 2, homo)
+    cov_e = study.covariance(J, np.ones(len(rows)), homo)
+    se_v, se_e = math.sqrt(cov_v[jH, jH]), math.sqrt(cov_e[jH, jH])
+    corr = cov_e[jH, jxi] / math.sqrt(cov_e[jH, jH] * cov_e[jxi, jxi])
+    record("Rough identifiability", "SE(H), 20 quotes, equal weights, 0.5 vp noise", se_e, 0.06,
+           se_e < 0.06)
+    record("Rough identifiability", "SE(H), same quotes, vega^2 weights", se_v, 0.15, se_v > 0.15,
+           note="H not identified: the weights discard the short end")
+    record("Rough identifiability", "corr(H, xi) at the truth", abs(corr), 0.9, abs(corr) > 0.9,
+           note="the rough analogue of kappa/theta")
+
+
 # ------------------------------------------------------------------ engineering
 def h_engineering():
     out = subprocess.run(
@@ -583,7 +648,8 @@ def h_replay():
 CHECKS = [h_normal, h_black_scholes, h_finite_difference, h_char_func,
           h_branch_cut, h_bs_degeneracy, h_pricers, h_monte_carlo, h_density,
           h_hurst, h_forward, h_svi, h_arbitrage, h_calibration,
-          h_fractional_kernel, h_lift, h_engineering, h_replay]
+          h_fractional_kernel, h_lift, h_rough_robustness, h_identifiability_rough,
+          h_engineering, h_replay]
 
 
 def main():

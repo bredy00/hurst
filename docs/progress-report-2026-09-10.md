@@ -101,9 +101,20 @@ exponent, which would have looked like an estimator bug rather than a fixture bu
 - **Lifted fractional Riccati system**, solved by RK4 — an N-dimensional set of
   ordinary Riccati ODEs, one per factor.
 - **Hawkes self-exciting jump intensity** `λ(t) = μ + Σ α e^(−β(t−tᵢ))` over
-  past events, in place of constant-λ Poisson.
-- **Kalman and dual Kalman filtering** on an Ornstein–Uhlenbeck state space, with
-  adaptive measurement noise across regime changes.
+  past events, in place of constant-λ Poisson. *Scope, corrected 2026-09-12:*
+  the Hawkes component is not tied to the Ornstein–Uhlenbeck process. It is one
+  jump-arrival mechanism to be attached to three hosts — the OU intensity model,
+  classical Heston (jumps in the log-price with self-exciting intensity, the
+  Bates-with-Hawkes branch) and the lifted rough Heston (the same jumps on the
+  rough variance host) — so that the second-spike-larger property can be
+  compared across the three volatility backbones rather than shown once.
+- **Kalman and dual Kalman filtering** — likewise not OU-only. The OU state
+  space (`F = e^(−κΔt)`, `Q = (σ²/2κ)(1−e^(−2κΔt))`) is the first instance; the
+  same filter and the dual (state + parameter) filter are then run on the
+  classical Heston variance and on the lifted rough Heston factors `U_i`,
+  whose Markovian form is exactly what makes a Kalman filter applicable to a
+  rough model at all. Adaptive measurement noise across regime changes in all
+  three.
 
 # Literature and resources
 

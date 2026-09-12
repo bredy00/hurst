@@ -358,7 +358,7 @@
    "threshold": 0.01,
    "ok": true,
    "unit": "rel",
-   "note": "7 iters, 0.6s"
+   "note": "7 iters, 0.4s"
   },
   {
    "group": "Calibration",
@@ -507,7 +507,7 @@
   {
    "group": "Markovian lift",
    "name": "full N-node lift at H = 0.4999 vs Heston",
-   "measured": 1.641503986565642e-05,
+   "measured": 1.6415039865606023e-05,
    "threshold": 0.0001,
    "ok": true,
    "unit": "",
@@ -516,7 +516,7 @@
   {
    "group": "Markovian lift",
    "name": "ETDRK4 vs implicit trapezoidal + Richardson (H=0.12)",
-   "measured": 3.7941004989257762e-06,
+   "measured": 3.7941004989427995e-06,
    "threshold": 5e-06,
    "ok": true,
    "unit": "",
@@ -525,11 +525,74 @@
   {
    "group": "Markovian lift",
    "name": "rough objective evaluation, 10 expiries x 13 strikes",
-   "measured": 0.9182964999999967,
+   "measured": 0.5958963000011863,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
    "note": "auto scheme; vanilla Heston is ~14 ms"
+  },
+  {
+   "group": "Rough robustness",
+   "name": "exptrap at 120 steps, u to 1200 (NOT unconditionally stable)",
+   "measured": 1.2104066067592526e+36,
+   "threshold": 1.0,
+   "ok": true,
+   "unit": "",
+   "note": "|phi(u - i/2)| must be <= 1; kept to prove the constraint"
+  },
+  {
+   "group": "Rough robustness",
+   "name": "stability-sized exptrap, same u range: max |phi(u - i/2)|",
+   "measured": 0.9987515190070971,
+   "threshold": 1.0,
+   "ok": true,
+   "unit": "",
+   "note": "383 steps"
+  },
+  {
+   "group": "Rough robustness",
+   "name": "runaway parameters: maturities priced in-band (of 4)",
+   "measured": 4,
+   "threshold": 4,
+   "ok": true,
+   "unit": "",
+   "note": "Carr-Madan returned 1.9e18 / 2.9e28 at 30 / 90 d here"
+  },
+  {
+   "group": "Rough robustness",
+   "name": "unpriceable quote: minimum charge (vol) vs 0 before",
+   "measured": 4.754324270165518,
+   "threshold": 4.754324269165518,
+   "ok": true,
+   "unit": "",
+   "note": "exact fit costs 1.4e-22"
+  },
+  {
+   "group": "Rough identifiability",
+   "name": "SE(H), 20 quotes, equal weights, 0.5 vp noise",
+   "measured": 0.04711444807209752,
+   "threshold": 0.06,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Rough identifiability",
+   "name": "SE(H), same quotes, vega^2 weights",
+   "measured": 0.20238488488963058,
+   "threshold": 0.15,
+   "ok": true,
+   "unit": "",
+   "note": "H not identified: the weights discard the short end"
+  },
+  {
+   "group": "Rough identifiability",
+   "name": "corr(H, xi) at the truth",
+   "measured": 0.9775844056955758,
+   "threshold": 0.9,
+   "ok": true,
+   "unit": "",
+   "note": "the rough analogue of kappa/theta"
   },
   {
    "group": "Engineering",
@@ -543,7 +606,7 @@
   {
    "group": "Engineering",
    "name": "startup to actionable error, no TWS",
-   "measured": 0.5581019999990531,
+   "measured": 0.6301726000019698,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
@@ -552,7 +615,7 @@
   {
    "group": "Engineering",
    "name": "calibration objective evaluation",
-   "measured": 9.564379999937955,
+   "measured": 8.43577999912668,
    "threshold": 200.0,
    "ok": true,
    "unit": "ms",
@@ -586,7 +649,7 @@
    "note": "recorded vs replayed surface points"
   }
  ],
- "seconds": 19.776410599999508,
+ "seconds": 23.92950579999888,
  "python": "3.12.3",
  "numpy": "2.5.2"
 }

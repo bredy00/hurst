@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 captures/frames*/
 .gstack/
+captures/test_*.log
+captures/healthcheck.log

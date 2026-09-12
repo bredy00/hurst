@@ -74,27 +74,51 @@ class MarketSurface:
         return cls(np.array(tau), np.array(k), np.array(iv), np.array(w))
 
 
+# Failure classes returned by model_ivs(..., return_status=True)
+OK, BELOW_RESOLUTION, MODEL_FAILURE = 0, 1, 2
+
+# The implied-vol inversion searches [1e-4, 5.0]. A quote the model cannot price
+# is charged as if the model had quoted the ceiling: no finite, priceable
+# outcome can cost more, so failing is never a way to lower the objective.
+FAILURE_IV = 5.0
+RESOLUTION = 1e-14
+
+
 def model_ivs(params, surface, cf_factory, pricer=fo.carr_madan_call,
-              tol=CALIB_TOL):
+              tol=CALIB_TOL, return_status=False):
     """
     Model implied vols at every quote on the surface.
 
-    Returns (ivs, n_failed). A point whose price cannot be inverted -- far enough
-    out that the model value is below a tick -- comes back as NaN rather than a
-    fabricated number, and the caller decides what to do with it.
+    Returns (ivs, n_failed), or (ivs, n_failed, status) with return_status. A
+    point whose price cannot be inverted comes back as NaN rather than a
+    fabricated number, and `status` says why:
+
+      BELOW_RESOLUTION  the model's time value is below 1e-14 -- far enough out
+                        that the model value is effectively zero
+      MODEL_FAILURE     the price is non-finite or outside the no-arbitrage band
+                        (a broken solve, or a pricer that declined to answer)
     """
     out = np.full(len(surface), np.nan)
+    status = np.zeros(len(surface), dtype=int)
     failed = 0
     for tau, idx in surface.by_expiry:
         cf = cf_factory(params, tau)
         ks = surface.k[idx]
-        prices = np.atleast_1d(pricer(ks, tau, cf, tol=tol))
+        prices = np.atleast_1d(np.asarray(pricer(ks, tau, cf, tol=tol), dtype=float))
         # Whole strip at once. One-at-a-time inversion was measured at half the
         # cost of an entire objective evaluation, nearly all of it numpy call
         # overhead rather than arithmetic.
         vols = fo.implied_vols_from_calls(prices, ks, tau)
-        failed += int(np.count_nonzero(~np.isfinite(vols)))
+        bad = ~np.isfinite(vols)
+        failed += int(np.count_nonzero(bad))
+        intrinsic = np.maximum(1.0 - np.exp(ks), 0.0)
+        below = bad & np.isfinite(prices) & (prices <= intrinsic + RESOLUTION) & (prices > intrinsic - 1e-9)
+        st = np.where(bad, MODEL_FAILURE, OK)
+        st[below] = BELOW_RESOLUTION
+        status[idx] = st
         out[idx] = vols
+    if return_status:
+        return out, failed, status
     return out, failed
 
 
@@ -103,13 +127,41 @@ def residuals(params, surface, cf_factory, pricer=fo.carr_madan_call,
     """
     sqrt(w) * (model_iv - market_iv), the vector Levenberg-Marquardt minimises.
 
-    Points the model cannot price contribute exactly zero rather than being
-    dropped: the residual vector has to keep a fixed length for the Jacobian to
-    make sense, and a zero is the honest statement that this quote carried no
-    information about the fit.
+    The vector keeps a fixed length for the Jacobian, so unpriceable points
+    must be given a value, and which value is not a detail. An earlier version
+    gave every one of them exactly zero -- "no information" -- and a rough
+    Heston fit used that: it walked to parameters where two whole maturities
+    came back unpriceable, their residuals vanished, and the cost FELL, ending
+    at H = 0.02 and theta = 0.88 with garbage prices of 1e18 at 30 and 90 days.
+
+    Now:
+      * the model says ~zero time value AND the market quote is itself below
+        resolution: genuinely no information, 0;
+      * the model says ~zero time value where the market prices real time value:
+        the model quoted zero vol, residual sqrt(w) * (0 - market_iv);
+      * the model failed (non-finite or out-of-band price): charged at
+        FAILURE_IV, which no priceable outcome can exceed.
     """
-    mv, failed = model_ivs(params, surface, cf_factory, pricer, tol)
-    r = np.sqrt(surface.weight) * (mv - surface.iv)
+    import volsurf_core as vc
+
+    mv, failed, status = model_ivs(params, surface, cf_factory, pricer, tol,
+                                   return_status=True)
+    sw = np.sqrt(surface.weight)
+    r = sw * (mv - surface.iv)
+    if failed:
+        below = status == BELOW_RESOLUTION
+        if np.any(below):
+            K = np.exp(surface.k[below])
+            c_mkt = np.array([float(vc.bs_price(1.0, Ki, max(v, 1e-8), t, 1.0, 'C'))
+                              for Ki, v, t in zip(K, surface.iv[below], surface.tau[below])])
+            informative = c_mkt - np.maximum(1.0 - K, 0.0) > RESOLUTION
+            rb = np.where(informative, sw[below] * (0.0 - surface.iv[below]), 0.0)
+            r[below] = rb
+        fail = status == MODEL_FAILURE
+        r[fail] = sw[fail] * (FAILURE_IV - surface.iv[fail])
+    # By here every model-side failure has a finite charge; anything still
+    # non-finite comes from the MARKET row itself (a NaN quote or weight), which
+    # carries no information.
     r[~np.isfinite(r)] = 0.0
     return r, failed
 
