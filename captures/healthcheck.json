@@ -525,7 +525,7 @@
   {
    "group": "Markovian lift",
    "name": "rough objective evaluation, 10 expiries x 13 strikes",
-   "measured": 0.5870110000105342,
+   "measured": 0.5892530999990413,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
@@ -768,7 +768,7 @@
   {
    "group": "Engineering",
    "name": "startup to actionable error, no TWS",
-   "measured": 0.5327526999899419,
+   "measured": 0.5384939999930793,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
@@ -777,7 +777,7 @@
   {
    "group": "Engineering",
    "name": "calibration objective evaluation",
-   "measured": 8.7186799995834,
+   "measured": 8.288140001241118,
    "threshold": 200.0,
    "ok": true,
    "unit": "ms",
@@ -811,7 +811,7 @@
    "note": "recorded vs replayed surface points"
   }
  ],
- "seconds": 26.931010100001004,
+ "seconds": 28.573408899988863,
  "python": "3.12.3",
  "numpy": "2.5.2"
 }

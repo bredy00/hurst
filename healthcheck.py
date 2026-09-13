@@ -792,8 +792,12 @@ def main():
                 print("|---|---|---|---|")
             v = fmt(r["measured"]) + (f" {r['unit']}" if r["unit"] else "")
             th = fmt(r["threshold"]) + (f" {r['unit']}" if r["unit"] else "")
-            note = f"<br><sub>{r['note']}</sub>" if r["note"] else ""
-            print(f"| {r['name']}{note} | `{v}` | `{th}` | "
+            # A literal '|' in a check name ("|phi(u)| <= 1") splits the table
+            # cell and drops the row's verdict; the 10 September report shipped
+            # with that row broken.
+            name = str(r["name"]).replace("|", "\\|")
+            note = f"<br><sub>{str(r['note']).replace('|', chr(92) + '|')}</sub>" if r["note"] else ""
+            print(f"| {name}{note} | `{v}` | `{th}` | "
                   f"{'PASS' if r['ok'] else '**FAIL**'} |")
         print(f"\n{n_ok} of {len(RESULTS)} checks pass ({dt:.0f}s).")
     else:
