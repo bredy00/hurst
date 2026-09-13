@@ -358,7 +358,7 @@
    "threshold": 0.01,
    "ok": true,
    "unit": "rel",
-   "note": "7 iters, 0.4s"
+   "note": "7 iters, 0.3s"
   },
   {
    "group": "Calibration",
@@ -525,7 +525,7 @@
   {
    "group": "Markovian lift",
    "name": "rough objective evaluation, 10 expiries x 13 strikes",
-   "measured": 0.5958963000011863,
+   "measured": 0.5870110000105342,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
@@ -595,6 +595,168 @@
    "note": "the rough analogue of kappa/theta"
   },
   {
+   "group": "Hawkes",
+   "name": "mean rate vs mu/(1-n), in SE",
+   "measured": 0.5935529906052689,
+   "threshold": 3.0,
+   "ok": true,
+   "unit": "SE",
+   "note": "12.457 vs 12.5"
+  },
+  {
+   "group": "Hawkes",
+   "name": "count variance / Hawkes (1971) closed form, 0.25 y",
+   "measured": 1.0191622137469896,
+   "threshold": 0.15,
+   "ok": true,
+   "unit": "",
+   "note": "Fano 5.93"
+  },
+  {
+   "group": "Hawkes",
+   "name": "MLE plant-and-recover, worst |z|",
+   "measured": 1.0037829971452878,
+   "threshold": 3.0,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Hawkes",
+   "name": "time rescaling KS p, Hawkes fit (should pass)",
+   "measured": 0.5838477895797223,
+   "threshold": 0.01,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Hawkes",
+   "name": "time rescaling KS p, Poisson fit to the same events",
+   "measured": 0.0,
+   "threshold": 1e-06,
+   "ok": true,
+   "unit": "",
+   "note": "clustering is detected, not assumed"
+  },
+  {
+   "group": "Hawkes",
+   "name": "second spike: superposition identity, 4 hosts",
+   "measured": 8.881784197001252e-16,
+   "threshold": 1e-12,
+   "ok": true,
+   "unit": "",
+   "note": "inc2 - inc1 = r(d+W) - r(d)"
+  },
+  {
+   "group": "Hawkes",
+   "name": "Heston: property switches on at alpha = kappa (1.03 kappa)",
+   "measured": 1.375316330556875e-06,
+   "threshold": 0.0,
+   "ok": true,
+   "unit": "",
+   "note": "at 0.97 kappa: -2.1e-06"
+  },
+  {
+   "group": "Hawkes",
+   "name": "rough (driver jumps): pairs with the property at n = 0.6",
+   "measured": 0,
+   "threshold": 0,
+   "ok": true,
+   "unit": "",
+   "note": "14 of 21 at n = 0.95 -- needs near-critical clustering"
+  },
+  {
+   "group": "Hawkes",
+   "name": "kurtosis vs scale-mixture closed form, in SE",
+   "measured": 0.7597296331139617,
+   "threshold": 4.0,
+   "ok": true,
+   "unit": "SE",
+   "note": "5.73 vs 5.59; ratio to Poisson = daily Fano"
+  },
+  {
+   "group": "Kalman",
+   "name": "fast scalar path vs generic matrix filter",
+   "measured": 0.0,
+   "threshold": 1e-12,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Kalman",
+   "name": "RMSE improvement minus steady-state theory",
+   "measured": 0.3392189828710479,
+   "threshold": 2.0,
+   "ok": true,
+   "unit": "pts",
+   "note": "45.6% vs 45.2%"
+  },
+  {
+   "group": "Kalman",
+   "name": "lecture AR(1) kappa on noisy quotes / true kappa",
+   "measured": 12.596620737019443,
+   "threshold": 2.0,
+   "ok": true,
+   "unit": "x",
+   "note": "attenuation bias; MLE through the filter is unbiased"
+  },
+  {
+   "group": "Kalman",
+   "name": "dual vs joint EKF agreement",
+   "measured": 0.12904570039913682,
+   "threshold": 1.0,
+   "ok": true,
+   "unit": "%",
+   "note": ""
+  },
+  {
+   "group": "Kalman",
+   "name": "recursive MLE (Ljung) distance from the MLE",
+   "measured": 0.2286500282205055,
+   "threshold": 1.0,
+   "ok": true,
+   "unit": "SE",
+   "note": "Wan-Nelson dual: 0.07 SE"
+  },
+  {
+   "group": "Kalman",
+   "name": "strict: steps to re-converge after the regime change",
+   "measured": 18.0,
+   "threshold": 2.0,
+   "ok": true,
+   "unit": "",
+   "note": "bad-print excursion 2.0x normal error"
+  },
+  {
+   "group": "Kalman",
+   "name": "adaptive: bad-print excursion (x normal error)",
+   "measured": 14.917652792705663,
+   "threshold": 6.044214182665649,
+   "ok": true,
+   "unit": "x",
+   "note": "re-converges in 0 steps"
+  },
+  {
+   "group": "Kalman",
+   "name": "robust: steps to re-converge (and ignores the print)",
+   "measured": 1.5,
+   "threshold": 2.0,
+   "ok": true,
+   "unit": "",
+   "note": "excursion 1.7x vs strict 2.0x"
+  },
+  {
+   "group": "Kalman",
+   "name": "lifted rough filter: RMSE improvement over quotes",
+   "measured": 47.409820677758866,
+   "threshold": 30.0,
+   "ok": true,
+   "unit": "%",
+   "note": "24 lifted factors as the state, rank-one Q"
+  },
+  {
    "group": "Engineering",
    "name": "scipy modules on the live import path",
    "measured": 0,
@@ -606,7 +768,7 @@
   {
    "group": "Engineering",
    "name": "startup to actionable error, no TWS",
-   "measured": 0.6301726000019698,
+   "measured": 0.5327526999899419,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
@@ -615,7 +777,7 @@
   {
    "group": "Engineering",
    "name": "calibration objective evaluation",
-   "measured": 8.43577999912668,
+   "measured": 8.7186799995834,
    "threshold": 200.0,
    "ok": true,
    "unit": "ms",
@@ -649,7 +811,7 @@
    "note": "recorded vs replayed surface points"
   }
  ],
- "seconds": 23.92950579999888,
+ "seconds": 26.931010100001004,
  "python": "3.12.3",
  "numpy": "2.5.2"
 }

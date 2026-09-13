@@ -570,6 +570,125 @@ def h_identifiability_rough():
            note="the rough analogue of kappa/theta")
 
 
+# ------------------------------------------------------------- Session F
+def h_hawkes():
+    import models.hawkes as hk
+    import models.jump_hosts as jh
+    from scipy import stats
+    Hp = hk.HawkesParams(mu=5.0, alpha=150.0, beta=250.0)
+    ev = hk.simulate(Hp, 5.0, n_paths=3000, seed=1, burn_in=1.0)
+    rate = ev.counts().mean() / 5.0
+    se = math.sqrt(hk.count_variance(Hp, 5.0) / 3000) / 5.0
+    record("Hawkes", "mean rate vs mu/(1-n), in SE", abs(rate - Hp.stationary_intensity) / se, 3.0,
+           abs(rate - Hp.stationary_intensity) < 3 * se, unit="SE", note=f"{rate:.3f} vs 12.5")
+    c = ev.counts(0.0, 0.25).astype(float)
+    ratio = c.var(ddof=1) / hk.count_variance(Hp, 0.25)
+    record("Hawkes", "count variance / Hawkes (1971) closed form, 0.25 y", ratio, 0.15,
+           abs(ratio - 1) < 0.15, note=f"Fano {c.var(ddof=1)/c.mean():.2f}")
+    one = hk.simulate(Hp, 300.0, n_paths=1, seed=10, burn_in=1.0).path(0)
+    fit = hk.fit_mle(one, 300.0)
+    zmax = max(abs(getattr(fit["params"], k) - getattr(Hp, k)) / fit["se"][k] for k in ("mu", "alpha", "beta"))
+    record("Hawkes", "MLE plant-and-recover, worst |z|", zmax, 3.0, zmax < 3.0)
+    ks_h = stats.kstest(hk.rescaled_intervals(fit["params"], one), "expon").pvalue
+    ks_p = stats.kstest(hk.rescaled_intervals(hk.fit_mle(one, 300.0, poisson=True)["params"], one), "expon").pvalue
+    record("Hawkes", "time rescaling KS p, Hawkes fit (should pass)", ks_h, 0.01, ks_h > 0.01)
+    record("Hawkes", "time rescaling KS p, Poisson fit to the same events", ks_p, 1e-6, ks_p < 1e-6,
+           note="clustering is detected, not assumed")
+
+    dt = 1.0 / 1008
+    hosts = [(jh.OUHost(kappa=3.0, theta=math.log(0.04), sigma=1.0), jh.JumpSizes(state_mean=0.05)),
+             (jh.HestonHost(kappa=3.0, theta=0.04, xi=0.3), jh.JumpSizes(state_mean=0.01)),
+             (jh.RoughHost(jump_mode="driver"), jh.JumpSizes(state_mean=0.002)),
+             (jh.RoughHost(jump_mode="direct"), jh.JumpSizes(state_mean=0.01))]
+    err = 0.0
+    for host, J in hosts:
+        a = jh.second_spike(host, Hp, J, dt, 20, 8)
+        err = max(err, abs((a["inc2"] - a["inc1"]) - (a["r_dW"] - a["r_d"])))
+    record("Hawkes", "second spike: superposition identity, 4 hosts", err, 1e-12, err < 1e-12,
+           note="inc2 - inc1 = r(d+W) - r(d)")
+    host, J = hosts[1]
+    up = jh.second_spike(host, hk.HawkesParams(5.0, 3.09, 3.09 / 0.6), J, dt, 2, 1)
+    dn = jh.second_spike(host, hk.HawkesParams(5.0, 2.91, 2.91 / 0.6), J, dt, 2, 1)
+    record("Hawkes", "Heston: property switches on at alpha = kappa (1.03 kappa)", up["inc2"] - up["inc1"],
+           0.0, up["inc2"] > up["inc1"] and dn["inc2"] < dn["inc1"],
+           note=f"at 0.97 kappa: {dn['inc2'] - dn['inc1']:+.1e}")
+    grid = [(d, w) for d in (2, 4, 8, 20, 40, 80) for w in (1, 2, 4, 8, 20, 40) if w < d]
+    host, J = hosts[2]
+    held = sum(1 for d, w in grid if (lambda a: a["inc2"] > a["inc1"])(jh.second_spike(host, Hp, J, dt, d, w)))
+    crit = hk.HawkesParams(12.5 * 0.05, 237.5, 250.0)
+    held_c = sum(1 for d, w in grid if (lambda a: a["inc2"] > a["inc1"])(jh.second_spike(host, crit, J, dt, d, w)))
+    record("Hawkes", "rough (driver jumps): pairs with the property at n = 0.6", held, 0, held == 0,
+           note=f"{held_c} of {len(grid)} at n = 0.95 -- needs near-critical clustering")
+    sim = jh.simulate(jh.ConstantHost(0.04), Hp, jh.JumpSizes(price_std=0.03), 2.0, 504, 3000, seed=5, rho=0.0)
+    k, kse = jh.excess_kurtosis(np.diff(sim["X"], axis=0).T)
+    th = jh.excess_kurtosis_theory(0.04, Hp, 0.03, 1 / 252)
+    record("Hawkes", "kurtosis vs scale-mixture closed form, in SE", abs(k - th) / kse, 4.0,
+           abs(k - th) < 4 * kse, unit="SE", note=f"{k:.2f} vs {th:.2f}; ratio to Poisson = daily Fano")
+
+
+def h_kalman():
+    import filters.kalman as kf
+    dt = 1 / 252
+    m = kf.OUModel(dt)
+    p = dict(kappa=5.0, theta=0.2, sigma=0.3, R=0.05 ** 2)
+    x = kf.simulate_ou(5.0, 0.2, 0.3, dt, 5000, seed=1)
+    y = x + np.random.default_rng(1001).normal(0.0, 0.05, 5000)
+    r = kf.kalman_filter(m, p, y)
+    g = kf.kalman_filter(m, p, y, policy=kf.Robust(threshold=1e12))
+    record("Kalman", "fast scalar path vs generic matrix filter", float(np.max(np.abs(r["estimate"] - g["estimate"]))),
+           1e-12, float(np.max(np.abs(r["estimate"] - g["estimate"]))) < 1e-12)
+    _, _, Pss = kf.steady_state_ou(p, dt)
+    imp = 1 - math.sqrt(float(np.mean((r["estimate"][200:] - x[200:]) ** 2))) / \
+        math.sqrt(float(np.mean((y[200:] - x[200:]) ** 2)))
+    theory = 1 - math.sqrt(Pss / p["R"])
+    record("Kalman", "RMSE improvement minus steady-state theory", abs(imp - theory) * 100, 2.0,
+           abs(imp - theory) < 0.02, unit="pts", note=f"{100*imp:.1f}% vs {100*theory:.1f}%")
+    ar = kf.ar1_calibration(y, dt)["kappa"]
+    record("Kalman", "lecture AR(1) kappa on noisy quotes / true kappa", ar / 5.0, 2.0, ar / 5.0 > 2.0,
+           unit="x", note="attenuation bias; MLE through the filter is unbiased")
+    fit = kf.fit_mle(m, y, dict(p, kappa=1.5), names=("kappa",))
+    du = kf.dual_kalman(m, dict(p, kappa=1.5), y, learn=("kappa",))
+    jo = kf.joint_ekf(m, dict(p, kappa=1.5), y, learn=("kappa",))
+    rp = kf.recursive_mle(m, dict(p, kappa=1.5), y, learn=("kappa",))
+    se = fit["se"]["kappa"]
+    record("Kalman", "dual vs joint EKF agreement", abs(du["final"]["kappa"] - jo["final"]["kappa"]) / du["final"]["kappa"] * 100,
+           1.0, abs(du["final"]["kappa"] - jo["final"]["kappa"]) < 0.01 * du["final"]["kappa"], unit="%")
+    record("Kalman", "recursive MLE (Ljung) distance from the MLE", abs(rp["final"]["kappa"] - fit["params"]["kappa"]) / se,
+           1.0, abs(rp["final"]["kappa"] - fit["params"]["kappa"]) < se, unit="SE",
+           note=f"Wan-Nelson dual: {abs(du['final']['kappa'] - fit['params']['kappa']) / se:.2f} SE")
+
+    n, kj, ko = 500, 150, 380
+    po = dict(kappa=0.5, theta=100.0, sigma=8.0, R=25.0)
+    rows = {"strict": [], "adaptive": [], "robust": []}
+    for seed in range(12):
+        truth = kf.simulate_ou(po["kappa"], po["theta"], po["sigma"], dt, n, seed=seed, jumps={kj: -28.0})
+        yy = truth + np.random.default_rng(5000 + seed).normal(0.0, 5.0, n)
+        yy[ko] = truth[ko] - 30.0
+        for name, pol in (("strict", kf.Strict()), ("adaptive", kf.Adaptive(3.0)), ("robust", kf.Robust(3.0, 2))):
+            est = kf.kalman_filter(kf.OUModel(dt), po, yy, policy=pol)["estimate"]
+            base = math.sqrt(float(np.mean((est[20:kj] - truth[20:kj]) ** 2)))
+            st = kf.reconvergence_steps(est, truth, kj, 3 * base, hold=5, limit=200)
+            rows[name].append((200 if st is None else st, kf.excursion(est, truth, ko, 10) / base))
+    med = {k: (float(np.median([a for a, _ in v])), float(np.median([b for _, b in v]))) for k, v in rows.items()}
+    record("Kalman", "strict: steps to re-converge after the regime change", med["strict"][0], 2.0,
+           med["strict"][0] > 2, note=f"bad-print excursion {med['strict'][1]:.1f}x normal error")
+    record("Kalman", "adaptive: bad-print excursion (x normal error)", med["adaptive"][1], 3 * med["strict"][1],
+           med["adaptive"][1] > 3 * med["strict"][1], unit="x", note=f"re-converges in {med['adaptive'][0]:.0f} steps")
+    record("Kalman", "robust: steps to re-converge (and ignores the print)", med["robust"][0], 2.0,
+           med["robust"][0] <= 2 and med["robust"][1] <= med["strict"][1],
+           note=f"excursion {med['robust'][1]:.1f}x vs strict {med['strict'][1]:.1f}x")
+
+    rm = kf.LiftedRoughModel(dt)
+    pr = dict(kappa=3.0, theta=0.04, xi=0.3, R=0.05 ** 2)
+    V, _ = kf.simulate_rough(rm, pr, 2000, seed=0, substeps=1)
+    yv = V + np.random.default_rng(100).normal(0.0, 0.05, 2000)
+    rr = kf.kalman_filter(rm, pr, yv)
+    impr = 1 - math.sqrt(float(np.mean((rr["estimate"][100:] - V[100:]) ** 2))) / \
+        math.sqrt(float(np.mean((yv[100:] - V[100:]) ** 2)))
+    record("Kalman", "lifted rough filter: RMSE improvement over quotes", impr * 100, 30.0, impr > 0.30,
+           unit="%", note="24 lifted factors as the state, rank-one Q")
+
+
 # ------------------------------------------------------------------ engineering
 def h_engineering():
     out = subprocess.run(
@@ -649,7 +768,7 @@ CHECKS = [h_normal, h_black_scholes, h_finite_difference, h_char_func,
           h_branch_cut, h_bs_degeneracy, h_pricers, h_monte_carlo, h_density,
           h_hurst, h_forward, h_svi, h_arbitrage, h_calibration,
           h_fractional_kernel, h_lift, h_rough_robustness, h_identifiability_rough,
-          h_engineering, h_replay]
+          h_hawkes, h_kalman, h_engineering, h_replay]
 
 
 def main():

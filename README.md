@@ -13,11 +13,15 @@ sources/replay.py                     JSON record / replay of a chain snapshot
 models/heston.py                      Heston cf (Albrecher branch) + MC
 pricing/fourier.py                    Lewis + Carr-Madan, adaptive composite quadrature
 models/rough_heston.py                lifted rough Heston: kernel, lift, Riccati cf, Lewis pricer
+models/hawkes.py                      Hawkes process: exact simulation, closed forms, MLE, time rescaling
+models/jump_hosts.py                  Hawkes jumps on OU / Heston / rough Heston, exact expectations
+filters/kalman.py                     Kalman on OU / CIR / lifted rough; adaptive, robust, dual, recursive MLE
 calibrate/objective.py                implied-vol loss; model failure is charged, never zeroed
 calibrate/fit.py                      Levenberg-Marquardt, generic over the model; Tikhonov prior
 capture_v2.py / capture_v3.py         stand-in feeds + comparison images
 capture_rough_vs_heston.py            Phase 2 headline: both models, in-model + stylised market
 study_h_identifiability.py            Gauss-Newton standard error of H by surface design
+capture_session_f.py                  Session F figure: intensity, shock responses, kurtosis, filters
 debug_fbm_helper.py                   the Session A fBm fixture bug, reproduced
 debug_fd_methods.py                   which 2nd-derivative stencil holds order on real grids
 test_core.py                         103 checks   (the maths)
@@ -28,6 +32,8 @@ test_pricing.py                       29 checks   (Fourier pricers)
 test_calibrate.py                     65 checks   (objective, LM, identifiability, prior)
 test_rough.py                         58 checks   (Session D: kernel, lift, cf, robustness)
 test_rough_calibration.py             27 checks   (Session E: calibration, H, skew)
+test_hawkes.py                        54 checks   (Session F1: Hawkes on three hosts)
+test_filters.py                       34 checks   (Session F2: Kalman on three hosts)
 docs/superpowers/plans/               the six-session rough Heston plan
 captures/                             frames, GIFs, comparisons, snapshot.json
 .venv/                                python 3.12.3
@@ -43,6 +49,9 @@ captures/                             frames, GIFs, comparisons, snapshot.json
 .venv/Scripts/python.exe test_rough.py     # 58 passed
 .venv/Scripts/python.exe test_rough_calibration.py  # 27 passed, ~4 min
 .venv/Scripts/python.exe capture_rough_vs_heston.py # Phase 2 headline, ~6 min
+.venv/Scripts/python.exe test_hawkes.py    # 54 passed, ~15 s
+.venv/Scripts/python.exe test_filters.py   # 34 passed, ~2.5 min
+.venv/Scripts/python.exe capture_session_f.py # Session F figure
 .venv/Scripts/python.exe capture_heston.py      # Heston's own skew term structure
 .venv/Scripts/python.exe capture_calibration.py # Phase 1 baseline vs a rough surface
 .venv/Scripts/python.exe capture_v3.py    # re-render + end-to-end validation
@@ -399,12 +408,92 @@ misfit, not its sign. See `docs/phase1_baseline.md` and
 pricing 29, calibrate 65, rough 58, rough calibration 27.
 Health checks 72 of 72.
 
+## Session F (2026-09-13) -- Hawkes arrivals and Kalman filtering, on three hosts
+
+Scope as corrected on 2026-09-12: neither component is tied to the OU process.
+Each is built once and attached to an OU log-variance, classical Heston and the
+lifted rough Heston.
+
+### F1 -- Hawkes jumps (`models/hawkes.py`, `models/jump_hosts.py`)
+
+Exact Ogata simulation, vectorised across paths, checked against closed forms:
+the mean rate (12.4998 vs μ/(1−n) = 12.5), the count variance of Hawkes (1971),
+and the expected intensity after planted shocks, where an extra event's excess
+decays at β − α rather than β. Maximum likelihood recovers (μ, α, β) within 3 SE;
+the time-rescaling test passes for the Hawkes fit and rejects a Poisson fit to
+the same events (p ≈ 0).
+
+**Your second-spike claim, made exact.** By linearity,
+
+    E[increment after shock 2] − E[increment after shock 1] = r(d + W) − r(d)
+
+with r the single-shock mean response (verified to 1e-15). So the second spike is
+larger exactly when r is still *rising* over the window.
+
+| host | property |
+|---|---|
+| any host, **Poisson** | **never**: r only decays. The *level* after the second shock is still higher, by superposition, so a level comparison tests nothing |
+| OU, Heston with Hawkes | at short gaps iff **α > κ** (r′(0) = η(α − κ)), confirmed: on at 1.03κ, off at 0.97κ. At n = 0.6 it holds for gaps up to ~5 days |
+| rough Heston, jumps in the **Volterra driver** | **0 of 21** (gap, window) pairs at n = 0.6: each jump's effect decays like t^(H−½) faster than excitation builds. 14 of 21 at n = 0.95: it needs near-critical clustering, in line with El Euch–Fukasawa–Rosenbaum |
+| rough Heston, jumps **added to V directly** | holds at short gaps |
+
+Which rough variant is right is a modelling decision; both are implemented.
+
+**Kurtosis.** With constant variance and zero-mean Gaussian jumps, daily returns are a
+scale mixture, and excess kurtosis is exactly 3s⁴Var[N]/(vw + E[N]s²)². So the
+Hawkes/Poisson ratio is the daily Fano factor, 1.92; simulation matches both closed
+forms. On every stochastic-variance host Hawkes exceeds Poisson by 12–14 SE.
+
+### F2 -- Kalman filtering (`filters/kalman.py`)
+
+One filter, three state spaces: your lecture's OU (F, B, u, Q, K exactly), CIR with
+state-dependent Q, and **the 24 lifted rough factors as the state**. Their drift is
+linear and their process noise is rank one; that is what makes a rough model
+filterable.
+
+- Matches the lecture's four-line recursion to 1.7e-16. The gain converges to the
+  analytic steady state, and the RMSE gain over raw quotes (45.6%) is what theory
+  predicts (45.2%). R↑ ⇒ K↓: small R tracks the data, large R the model.
+- **The lecture's AR(1) calibration is biased by quote noise.** It puts κ at 61–65
+  for a true 5, because noise attenuates the regression slope. Maximum likelihood
+  through the filter recovers it within 1 SE.
+- **Strict vs adaptive** (the lecture's two panels, 40 seeds):
+
+  | host | strict | adaptive | robust (persistence-gated) |
+  |---|---|---|---|
+  | OU | 18 steps, bad print 2.3× | 0 steps, **17×** | **1 step, 1.7×** |
+  | Heston | 2 steps, 3.2× | 0 steps, **10×** | **1 step, 1.9×** |
+  | rough | 0 steps, 2.9× | 0 steps, 6.2× | 0 steps, 3.0× |
+
+  On rough Heston a shock relaxes like a power law and leaves no regime to lag behind.
+- **Dual Kalman.** The plan's "within 10% over 2000 steps" is not attainable:
+  the MLE's own SE at 2000 steps is 20% of κ. Wan–Nelson's dual EKF and the joint EKF
+  agree to 0.14%, but both carry **Ljung's (1979) bias**: they ignore how the gain
+  depends on the parameters, and land up to 2 SE from the MLE. `recursive_mle` carries
+  the full sensitivity equations and stays within 1 SE on every host-seed (total
+  deviation 2.5 SE vs 4.6 SE).
+- **Rough host findings.**
+  - QML κ is biased 2–4 SE when simulated variance spends ~13% of days below zero, and
+    unbiased (z +0.4, +0.4) where it never does. The clamp is a non-linearity the linear
+    filter cannot represent.
+  - A CIR filter fitted by MLE to rough variance forecasts it at 5 days within
+    −0.6% to +2.8% of the *true* lifted model, by pushing κ to 43–54. That is the
+    Session E phenomenon again; the lift's edge is the correct state space, not
+    short-horizon forecasting.
+
+See `captures/session_f.png`.
+
+**487 tests green**: core 103, fixes 47, surface 45, models 25, pricing 29,
+calibrate 65, rough 58, rough calibration 27, hawkes 54, filters 34.
+Health checks 90 of 90.
+
 ## Still open
 
-- **Session F** — Hawkes jump arrivals and the (dual) Kalman filter, each applied
-  to three hosts: the OU intensity model, classical Heston and the lifted rough
-  Heston (scope corrected 2026-09-12; the lifted factors `U_i` are what make a
-  Kalman filter applicable to the rough model).
+- **After Session F**: learning H itself in the filter (H defines the lifted
+  factors, so a parameter filter would change what the state means), a
+  positivity-preserving scheme for rough variance (the floor biases QML),
+  Hawkes estimation from real event data, and the nearly-unstable Hawkes →
+  rough volatility link as a model rather than a citation.
 - eSSVI (calendar-arbitrage-free by construction; `essvi_calendar_ok` measures
   but does not prevent).
 - The live IBKR path has still never run against a real TWS.

@@ -345,11 +345,11 @@ $$\partial_t\psi_i = -x_i\psi_i + \tfrac12(u^2+iu) + (\rho\xi iu-\kappa)\Psi + \
 
 $$\lambda(t)=\mu+\sum_{t_i<t}\alpha e^{-\beta(t-t_i)}$$
 
-- [ ] Test: unconditional intensity is `μ/(1−α/β)`; simulated mean rate matches to 2%.
-- [ ] Test: stationarity requires `α < β`; the constructor rejects `α ≥ β`.
-- [ ] Test: **your second-spike property.** Two clustered regime shocks must produce a second intensity peak strictly higher than the first, and a constant-λ Poisson process with the same average rate must not. This is the claim that motivates the model, so it gets asserted, not assumed.
-- [ ] Test: excess kurtosis of Hawkes returns exceeds that of Poisson returns at equal average jump rate.
-- [ ] Commit.
+- [x] Test: unconditional intensity is `μ/(1−α/β)`; simulated mean rate matches to 2%. *(−0.00%; also the Hawkes (1971) count variance, MLE and the time-rescaling test)*
+- [x] Test: stationarity requires `α < β`; the constructor rejects `α ≥ β`.
+- [x] Test: **your second-spike property.** Two clustered regime shocks must produce a second intensity peak strictly higher than the first, and a constant-λ Poisson process with the same average rate must not. This is the claim that motivates the model, so it gets asserted, not assumed. *(intensity peak: exact, α e^{−(β−α)d} higher. Vol spike: E[inc₂] − E[inc₁] = r(d+W) − r(d) exactly, so it holds iff the single-shock response is rising — never for Poisson; on OU/Heston iff α > κ at short gaps; on rough Heston with driver jumps only near criticality)*
+- [x] Test: excess kurtosis of Hawkes returns exceeds that of Poisson returns at equal average jump rate. *(closed form: ratio = daily Fano 1.92; 12–14 SE on every host)*
+- [x] Commit. *(49917bb)*
 
 ### Task F2: Dual Kalman filter
 
@@ -359,11 +359,11 @@ State-space from the lecture notes:
 
 `F = e^{−κΔt}`, `B = (1−e^{−κΔt})`, `u = θ`, `Q = (σ²/2κ)(1−e^{−2κΔt})`, `K = P/(P+R)`.
 
-- [ ] Test: on a simulated OU path with known `(κ, θ, σ)`, the filter's RMSE beats the raw observation RMSE by >30%.
-- [ ] Test: large `R` → small `K` → the filter tracks the model; small `R` → large `K` → it tracks the data. Assert both directions numerically.
-- [ ] Test: **dual filter** — with parameters unknown, the parameter filter converges to the true `κ` within 10% over 2000 steps.
-- [ ] Test: at a planted regime change, an adaptive-`R` filter re-converges in fewer steps than a fixed-`R` one.
-- [ ] Commit.
+- [x] Test: on a simulated OU path with known `(κ, θ, σ)`, the filter's RMSE beats the raw observation RMSE by >30%. *(45.6% vs steady-state theory 45.2%; also on CIR and the lifted rough state)*
+- [x] Test: large `R` → small `K` → the filter tracks the model; small `R` → large `K` → it tracks the data. Assert both directions numerically.
+- [ ] ~~Test: **dual filter** — with parameters unknown, the parameter filter converges to the true `κ` within 10% over 2000 steps.~~ **Not attainable:** the MLE's SE at 2000 steps is 20% of κ. Replaced by: dual EKF within 1 SE of the MLE on the same data; Wan–Nelson shown to carry Ljung's bias, removed by the recursive MLE.
+- [x] Test: at a planted regime change, an adaptive-`R` filter re-converges in fewer steps than a fixed-`R` one. *(corrected to the lecture's adaptive GAIN — inflating R would lower K — and asserted on both sides: adaptive catches the change and overreacts to a bad print; a persistence-gated filter does both right on OU and Heston)*
+- [x] Commit. *(a401a84)*
 
 ---
 
