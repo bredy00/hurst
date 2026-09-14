@@ -53,23 +53,64 @@ def norm_cdf(x):
 
 
 # --- time -------------------------------------------------------------------
+def us_dst(day):
+    """
+    Is US daylight saving in force on this date?
+
+    Second Sunday of March to first Sunday of November. The switch happens at
+    02:00 local, so for anything at the 16:00 close the calendar date decides it
+    exactly. Written out rather than read from zoneinfo so this module stays
+    free of a timezone database (test_core checks it against zoneinfo).
+    """
+    def nth_sunday(month, n):
+        first = datetime.date(day.year, month, 1)
+        return first + datetime.timedelta(days=(6 - first.weekday()) % 7 + 7 * (n - 1))
+    return nth_sunday(3, 2) <= day < nth_sunday(11, 1)
+
+
+def us_close_utc(day):
+    """The 16:00 New York close of `day`, as a naive UTC datetime."""
+    return datetime.datetime.combine(day, datetime.time(20 if us_dst(day) else 21, 0))
+
+
+def _as_naive_utc(t):
+    """Aware datetimes are converted to UTC. Naive ones are taken to BE UTC."""
+    if t.tzinfo is not None:
+        t = t.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    return t
+
+
 def tau_years(t0, expiry, min_tau=1e-6):
     """
     Time increment T - t0 in years, ACT/365.
 
-    t0 and expiry may be date or datetime. A date expiry is taken at 21:00 UTC
-    (US equity close), so an expiry later today is a real fraction of a day
-    rather than zero.
+    t0 and expiry may be date or datetime. A date expiry is taken at the 16:00
+    New York close in UTC -- 20:00 in summer, 21:00 in winter -- so an expiry
+    later today is a real fraction of a day rather than zero.
+
+    Naive datetimes mean UTC. Pass `datetime.datetime.now(datetime.timezone.utc)`,
+    never a bare `now()`: that is local wall-clock time, and on a UTC+3 machine
+    it made every live tau three hours short (Session G; see the tutorial).
     """
     if isinstance(expiry, datetime.datetime):
-        t_exp = expiry
+        t_exp = _as_naive_utc(expiry)
     else:
-        t_exp = datetime.datetime.combine(expiry, datetime.time(21, 0))
+        t_exp = us_close_utc(expiry)
     if isinstance(t0, datetime.datetime):
-        t_now = t0
+        t_now = _as_naive_utc(t0)
     else:
         t_now = datetime.datetime.combine(t0, datetime.time(14, 30))
     return max((t_exp - t_now).total_seconds() / SECONDS_PER_YEAR, min_tau)
+
+
+def new_york_date(t):
+    """The New York calendar date of an instant (aware, or naive meaning UTC)."""
+    u = _as_naive_utc(t)
+    # 04:00 UTC is midnight in New York in both seasons' worst case; use the
+    # UTC date's DST flag, which is wrong only between midnight and 02:00 local
+    # on the two switch days -- not a time anything here is recorded.
+    offset = 4 if us_dst(u.date()) else 5
+    return (u - datetime.timedelta(hours=offset)).date()
 
 
 def parse_ib_date(yyyymmdd):

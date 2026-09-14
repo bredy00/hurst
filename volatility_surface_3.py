@@ -24,6 +24,7 @@ the back months sit at hundredths. Sampling at fixed z makes every contract in
 the grid carry comparable vega, which is what makes the noise uniform.
 """
 
+import collections
 import math
 import datetime
 import socket
@@ -49,6 +50,21 @@ TICK_BID, TICK_ASK, TICK_LAST, TICK_CLOSE = 1, 2, 4, 9
 TICK_DELAYED_BID, TICK_DELAYED_ASK = 66, 67
 TICK_DELAYED_LAST, TICK_DELAYED_CLOSE = 68, 75
 TICK_BID_OPTION, TICK_ASK_OPTION, TICK_MODEL_OPTION = 10, 11, 13
+# Delayed data sends its greeks on 83, not 13. Filtering on 13 alone meant a
+# delayed-data session recorded bid/ask but never a single implied vol.
+TICK_DELAYED_MODEL_OPTION = 83
+MODEL_OPTION_TICKS = (TICK_MODEL_OPTION, TICK_DELAYED_MODEL_OPTION)
+MARKET_DATA_TYPES = {1: 'live', 2: 'frozen', 3: 'delayed', 4: 'delayed-frozen'}
+# IBKR quotes vega per ONE VOL POINT (a 0.01 move in implied vol). Everything in
+# this package -- iv_error, quote_weight, MAX_IV_UNCERTAINTY -- is per 1.00 of
+# vol, as bs_vega is. Unconverted, every live iv_error comes out 100x too big and
+# the 5-vol-point usability filter drops nearly the whole chain. The stand-in
+# feeds used bs_vega, so no test could see it (Session G). `record_chains.py
+# --check` measures the ratio on the first live quote.
+IB_VEGA_PER_UNIT_VOL = 100.0
+# Newer servers send Double.MAX_VALUE for a greek they did not compute, and
+# np.isfinite(1.8e308) is True.
+IB_UNSET = 1e300
 
 SPOT_TICK_ROLES = {
     TICK_LAST: 'last',   TICK_DELAYED_LAST: 'last',
@@ -173,6 +189,8 @@ class LiveSurfaceApp(EWrapper, EClient):
         self.chain_resolved = threading.Event()
         self.spot_ready = threading.Event()
         self.connect_failed = threading.Event()
+        self.error_counts = collections.Counter()
+        self.data_type_seen = {}    # reqId -> market data type IBKR says it is sending
 
     def connectAck(self):
         print("TWS Acknowledged Connection")
@@ -186,12 +204,16 @@ class LiveSurfaceApp(EWrapper, EClient):
             req_id, code, msg = args[0], args[2], args[3]
         else:
             req_id, code, msg = args[0], args[1], args[2]
+        self.error_counts[code] += 1
         if code == 502:
             self.connect_failed.set()
             for ev in (self.resolved, self.chain_resolved, self.spot_ready):
                 ev.set()
         if code not in BENIGN_CODES:
             print(f"IBKR Msg {req_id}: {code} - {msg}")
+
+    def marketDataType(self, reqId, marketDataType):
+        self.data_type_seen[reqId] = int(marketDataType)
 
     def contractDetails(self, reqId, contractDetails):
         self.underlying_conId = contractDetails.contract.conId
@@ -264,20 +286,20 @@ class LiveSurfaceApp(EWrapper, EClient):
     # --- Fix B: keep the greeks -------------------------------------------
     def tickOptionComputation(self, reqId, tickType, tickAttrib, impliedVol, delta,
                               optPrice, pvDividend, gamma, vega, theta, undPrice):
-        if tickType != TICK_MODEL_OPTION:
+        if tickType not in MODEL_OPTION_TICKS:
             return
-        if impliedVol is None or not np.isfinite(impliedVol) or impliedVol <= 0:
+        if impliedVol is None or not np.isfinite(impliedVol) or not 0 < impliedVol < IB_UNSET:
             return
         with self._lock:
             q = self._quote(reqId)
             if q is None:
                 return
             q.iv = float(impliedVol)
-            for name, val in (('delta', delta), ('gamma', gamma),
-                              ('vega', vega), ('theta', theta),
-                              ('model_price', optPrice), ('und_price', undPrice)):
-                if val is not None and np.isfinite(val):
-                    setattr(q, name, float(val))
+            for name, val, scale in (('delta', delta, 1.0), ('gamma', gamma, 1.0),
+                                     ('vega', vega, IB_VEGA_PER_UNIT_VOL), ('theta', theta, 1.0),
+                                     ('model_price', optPrice, 1.0), ('und_price', undPrice, 1.0)):
+                if val is not None and np.isfinite(val) and abs(val) < IB_UNSET:
+                    setattr(q, name, float(val) * scale)
             q.ts = time.monotonic()
 
     def quote_arrived_after(self, req_id, t0):
@@ -404,9 +426,9 @@ def resolve_forwards(app, ctxs, spot):
     return ctxs
 
 
-def grid_contracts(app, ctxs, symbol, n_sigma=N_SIGMA_BAND, max_strikes=21):
+def grid_contracts(app, ctxs, symbol, n_sigma=N_SIGMA_BAND, max_strikes=21, id_base=2000):
     """OTM contracts on a sigma-normalised band, split at the FORWARD."""
-    contracts, req_id = [], 2000
+    contracts, req_id = [], id_base
     for exp, ctx in ctxs.items():
         if not np.isfinite(ctx.forward) or not np.isfinite(ctx.sigma_atm):
             continue
@@ -638,8 +660,36 @@ def audit_surface(points, ctxs, k_probes=(-0.06, -0.03, 0.0, 0.03, 0.06)):
     return out
 
 
-def start_app(symbol='SPY', host='127.0.0.1', port=7497, client_id=36,
-              n_expiries=6, min_days_to_expiry=1, spot_timeout=15.0):
+def select_expiries_by_target(expirations, today, target_days, min_days_to_expiry=1):
+    """
+    One expiry per target maturity: the listed expiry nearest each target, in
+    days, never below `min_days_to_expiry`, duplicates dropped.
+
+    Taking the first n expiries is wrong for a chain with dailies: on SPY the
+    first twelve all sit inside three weeks, which leaves no term structure to
+    calibrate H against.
+    """
+    dated = [(e, (vc.parse_ib_date(e) - today).days) for e in sorted(expirations)]
+    dated = [(e, d) for e, d in dated if d >= min_days_to_expiry]
+    chosen = []
+    for t in target_days:
+        if not dated:
+            break
+        e, _ = min(dated, key=lambda ed: (abs(ed[1] - t), -ed[1]))
+        if e not in chosen:
+            chosen.append(e)
+    return sorted(chosen)
+
+
+def connect_app(symbol='SPY', host='127.0.0.1', port=7497, client_id=36,
+                spot_timeout=15.0, market_data_type=1, app_factory=None):
+    """
+    Probe, connect, resolve the underlying and its option chain, start spot.
+
+    market_data_type: 1 live, 2 frozen (last quotes at the close), 3 delayed,
+    4 delayed-frozen. If no spot arrives, live falls back to delayed and frozen
+    to delayed-frozen, and the type actually in use is kept on the app.
+    """
     # Fix A: answer "is anything listening?" in milliseconds
     t_probe = time.monotonic()
     if not probe_tws(host, port):
@@ -650,7 +700,7 @@ def start_app(symbol='SPY', host='127.0.0.1', port=7497, client_id=36,
             "Global Configuration > API > Settings > 'Enable ActiveX and Socket Clients'."
         )
 
-    app = LiveSurfaceApp()
+    app = (app_factory or LiveSurfaceApp)()
     app._symbol = symbol
     app.connect(host, port, clientId=client_id)
     threading.Thread(target=app.run, daemon=True).start()
@@ -666,49 +716,66 @@ def start_app(symbol='SPY', host='127.0.0.1', port=7497, client_id=36,
     under = Contract()
     under.symbol, under.secType = symbol, 'STK'
     under.exchange, under.currency = 'SMART', 'USD'
+    app.underlying = under
 
     app.reqContractDetails(1, under)
     if not app.resolved.wait(timeout=10) or app.underlying_conId == 0:
         raise ConnectionError_(f"Could not resolve a conId for {symbol}.")
 
-    app.reqMarketDataType(1)
+    app.market_data_type = int(market_data_type)
+    app.reqMarketDataType(app.market_data_type)
     app.reqMktData(app.SPOT_REQ_ID, under, "", False, False, [])
     if not app.spot_ready.wait(timeout=spot_timeout / 2):
-        print("No live spot tick; falling back to delayed market data (type 3).")
-        app.reqMarketDataType(3)
+        fallback = {1: 3, 2: 4}.get(app.market_data_type)
+        if fallback is None:
+            raise ConnectionError_(f"No usable price for {symbol} after {spot_timeout / 2:.0f}s.")
+        print(f"No {MARKET_DATA_TYPES[app.market_data_type]} spot tick; "
+              f"falling back to {MARKET_DATA_TYPES[fallback]} market data (type {fallback}).")
+        # The type applies to requests made AFTER it is set; the request already
+        # sent under the old type is dead (354/10089). Re-send it, or the fallback
+        # can never produce a price -- carried unnoticed from v2 (Session G).
+        app.market_data_type = fallback
+        app.cancelMktData(app.SPOT_REQ_ID)
+        app.reqMarketDataType(fallback)
+        app.reqMktData(app.SPOT_REQ_ID, under, "", False, False, [])
         if not app.spot_ready.wait(timeout=spot_timeout / 2):
             raise ConnectionError_(f"No usable price for {symbol} after {spot_timeout:.0f}s.")
-    spot = app.spot_price
-    print(f"Spot {symbol} = {spot:.2f}")
+    print(f"Spot {symbol} = {app.spot_price:.2f}  "
+          f"({MARKET_DATA_TYPES[app.market_data_type]} data)")
 
     app.reqSecDefOptParams(2, symbol, "", "STK", app.underlying_conId)
     if not app.chain_resolved.wait(timeout=15) or not app.expirations:
         raise ConnectionError_("No SMART / multiplier-100 chain returned.")
     print(f"Trading class '{app.trading_class}': "
           f"{len(app.expirations)} expiries, {len(app.strikes)} strikes")
+    return app
 
-    # Fix 6 (carried): no 0DTE
-    t0 = datetime.datetime.now()
-    today = t0.date()
-    dated = [(e, (vc.parse_ib_date(e) - today).days) for e in app.expirations]
-    exps = [e for e, d in dated if d >= min_days_to_expiry][:n_expiries]
-    skipped = [e for e, d in dated if 0 <= d < min_days_to_expiry]
-    if skipped:
-        print(f"Skipping 0DTE: {skipped}")
-    if not exps:
-        raise ConnectionError_("No expiries left after the 0DTE filter.")
 
-    # Seed pass: both rights near the money, for put-call parity
+def seed_and_grid(app, symbol, exps, t0=None, n_sigma=N_SIGMA_BAND, max_strikes=21,
+                  seed_timeout=5.0, sweep_grid=True, id_base=1000):
+    """
+    One self-consistent pass over the chain: both rights near the money for
+    put-call parity, then the OTM grid on a sigma band around THOSE forwards.
+
+    t0 must be an aware datetime (or naive UTC); it defaults to now in UTC.
+    Seed ids start at id_base and grid ids at id_base + 1000. A recorder moves
+    id_base on every cycle, so a late tick for a cancelled request can never
+    land on a different contract that happens to reuse its id.
+    """
+    t0 = t0 or datetime.datetime.now(datetime.timezone.utc)
+    spot = app.spot_price
     ctxs = build_expiry_contexts(app, exps, t0, spot)
-    seed, rid = [], 1000
+    seed, rid = [], id_base
     for exp, ctx in ctxs.items():
         for K in ctx.strikes:
             for right in ('C', 'P'):
                 app.id_map[rid] = (exp, K, right)
                 seed.append((rid, make_option(symbol, exp, K, right, app.trading_class)))
                 rid += 1
+    if rid > id_base + 1000:
+        raise ValueError("seed request ids would collide with the grid's (2000+)")
     print(f"Seed pass: {len(seed)} contracts (both rights) for put-call parity")
-    ChainSweeper(app, seed, quote_timeout=5.0).sweep()
+    ChainSweeper(app, seed, quote_timeout=seed_timeout).sweep()
 
     resolve_forwards(app, ctxs, spot)
     for exp in sorted(ctxs, key=lambda e: ctxs[e].tau):
@@ -716,8 +783,36 @@ def start_app(symbol='SPY', host='127.0.0.1', port=7497, client_id=36,
         print(f"  {exp}  tau={c.tau*365:6.2f}d  F={c.forward:8.2f}  "
               f"df={c.discount:.5f}  r2={c.parity_r2:.4f}  sigma_atm={c.sigma_atm:.4f}")
 
-    contracts = grid_contracts(app, ctxs, symbol)
-    print(f"Grid pass: {len(contracts)} OTM contracts on a +/-{N_SIGMA_BAND:g} sigma band")
+    contracts = grid_contracts(app, ctxs, symbol, n_sigma=n_sigma, max_strikes=max_strikes,
+                               id_base=id_base + 1000)
+    print(f"Grid pass: {len(contracts)} OTM contracts on a +/-{n_sigma:g} sigma band")
+    if sweep_grid:
+        ChainSweeper(app, contracts).sweep()
+    return ctxs, contracts
+
+
+def start_app(symbol='SPY', host='127.0.0.1', port=7497, client_id=36,
+              n_expiries=6, min_days_to_expiry=1, spot_timeout=15.0,
+              market_data_type=1, target_days=None):
+    app = connect_app(symbol, host, port, client_id, spot_timeout, market_data_type)
+
+    # Aware UTC: a bare now() is local wall-clock time (Session G bug)
+    t0 = datetime.datetime.now(datetime.timezone.utc)
+    today = vc.new_york_date(t0)
+    if target_days:
+        exps = select_expiries_by_target(app.expirations, today, target_days,
+                                         min_days_to_expiry)
+    else:
+        # Fix 6 (carried): no 0DTE
+        dated = [(e, (vc.parse_ib_date(e) - today).days) for e in app.expirations]
+        exps = [e for e, d in dated if d >= min_days_to_expiry][:n_expiries]
+        skipped = [e for e, d in dated if 0 <= d < min_days_to_expiry]
+        if skipped:
+            print(f"Skipping 0DTE: {skipped}")
+    if not exps:
+        raise ConnectionError_("No expiries left after the 0DTE filter.")
+
+    ctxs, contracts = seed_and_grid(app, symbol, exps, t0, sweep_grid=False)
     sweeper = ChainSweeper(app, contracts)
     sweeper.start()
     app.sweeper, app.ctxs = sweeper, ctxs

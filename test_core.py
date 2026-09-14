@@ -334,6 +334,30 @@ def test_time():
           c.tau_years(t0, datetime.date(2026, 9, 11)) > c.tau_years(t0, datetime.date(2026, 9, 7)))
     check("parse_ib_date", c.parse_ib_date("20260911") == datetime.date(2026, 9, 11))
 
+    # Session G: the live caller passed local wall-clock time as if it were UTC.
+    import zoneinfo
+    ny = zoneinfo.ZoneInfo("America/New_York")
+    days = [datetime.date(2026, 1, 1) + datetime.timedelta(days=i) for i in range(0, 1461, 3)]
+    wrong = [d for d in days
+             if c.us_close_utc(d) != datetime.datetime.combine(d, datetime.time(16, 0), ny)
+             .astimezone(datetime.timezone.utc).replace(tzinfo=None)]
+    check("US close in UTC matches zoneinfo on 487 dates over four years (DST both ways)",
+          not wrong, f"{len(wrong)} wrong, first {wrong[:2]}")
+    check("summer close is 20:00 UTC, winter 21:00",
+          c.us_close_utc(datetime.date(2026, 9, 15)).hour == 20
+          and c.us_close_utc(datetime.date(2026, 12, 15)).hour == 21)
+    ist = datetime.timezone(datetime.timedelta(hours=3))
+    t_local = datetime.datetime(2026, 9, 15, 17, 0, tzinfo=ist)          # 10:00 New York
+    got = c.tau_years(t_local, datetime.date(2026, 9, 16)) * 365 * 24
+    check("aware local time: 17:00 Istanbul to the next day's close is 30 hours",
+          abs(got - 30.0) < 1e-9, f"{got:.4f} h")
+    naive_local = c.tau_years(datetime.datetime(2026, 9, 15, 17, 0),
+                              datetime.date(2026, 9, 16)) * 365 * 24
+    check("the old bug, reproduced: a naive local clock loses the UTC offset",
+          abs(naive_local - 27.0) < 1e-9, f"{naive_local:.1f} h instead of 30")
+    check("New York date of 02:00 UTC in September is the previous day",
+          c.new_york_date(datetime.datetime(2026, 9, 16, 2, 0)) == datetime.date(2026, 9, 15))
+
 
 def test_local_skew_window():
     """

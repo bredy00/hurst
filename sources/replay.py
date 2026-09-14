@@ -40,8 +40,12 @@ def _restore(x):
     return float('nan') if x is None else x
 
 
-def record(app, ctxs, path, symbol=None):
-    """Write the current chain state to `path`. Returns the path."""
+def record(app, ctxs, path, symbol=None, meta=None):
+    """Write the current chain state to `path`. Returns the path.
+
+    `meta` is an optional dict stored verbatim (data type, cycle stats, error
+    counts). load() ignores it, so older readers are unaffected.
+    """
     path = pathlib.Path(path)
     snap = {
         "format": FORMAT,
@@ -56,6 +60,8 @@ def record(app, ctxs, path, symbol=None):
         },
         "quotes": [],
     }
+    if meta:
+        snap["meta"] = meta
     for req_id, q in sorted(app.quotes.items()):
         row = {"req_id": int(req_id)}
         for f in _QUOTE_FIELDS:
@@ -86,6 +92,7 @@ def load(path):
     app.spot_price = float(snap["spot"])
     app.trading_class = snap.get("trading_class")
     app.recorded_at = snap.get("recorded_at")
+    app.meta = snap.get("meta", {})
 
     ctxs = {}
     for exp, c in snap["expiries"].items():
