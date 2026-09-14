@@ -188,10 +188,10 @@ def test_strict_vs_adaptive():
               f"{r['robust'][0]:.0f} steps; excursion {r['robust'][1]:.1f}x")
     print(f"      ({time.perf_counter()-t0:.0f}s)")
 
-    rm = kf.LiftedRoughModel(DT)
+    rm = kf.LiftedRoughModel(DT, discretisation="euler")      # Session F's measurement
     pr = dict(P_ROUGH, R=0.03 ** 2)
     t0 = time.perf_counter()
-    rough = tradeoff(rm, pr, lambda s: kf.simulate_rough(rm, pr, n, seed=s, jumps={kj: 0.10})[0],
+    rough = tradeoff(rm, pr, lambda s: kf.simulate_rough(rm, pr, n, seed=s, jumps={kj: 0.10}, scheme="euler")[0],
                      kj, ko, 0.15, n, seeds=30)
     print(f"      rough Heston (variance jump +0.10): " + "  ".join(f"{k} {v[0]:.0f} steps / {v[1]:.1f}x" for k, v in rough.items())
           + f"  ({time.perf_counter()-t0:.0f}s)")
@@ -238,13 +238,13 @@ def test_cir_host():
 
 
 def test_rough_host():
-    print("\nF2 -- rough Heston host (the lifted factors are the state)")
-    rm = kf.LiftedRoughModel(DT)
+    print("\nF2 -- rough Heston host (the lifted factors are the state) -- Session F's Euler scheme, as measured")
+    rm = kf.LiftedRoughModel(DT, discretisation="euler")
     check("the lifted state space: rank-one process noise, H = w", np.linalg.matrix_rank(
         rm.process_cov(P_ROUGH, rm.initial(P_ROUGH)[0])) == 1 and np.allclose(rm.observation(P_ROUGH)[0], rm.w))
     imps = []
     for seed in range(3):
-        V, _ = kf.simulate_rough(rm, P_ROUGH, 2000, seed=seed, substeps=1)
+        V, _ = kf.simulate_rough(rm, P_ROUGH, 2000, seed=seed, substeps=1, scheme="euler")
         y = V + np.random.default_rng(100 + seed).normal(0.0, math.sqrt(P_ROUGH["R"]), 2000)
         r = kf.kalman_filter(rm, P_ROUGH, y)
         imps.append(1 - math.sqrt(float(np.mean((r["estimate"][100:] - V[100:]) ** 2)))
@@ -258,7 +258,7 @@ def test_rough_host():
     out = []
     t0 = time.perf_counter()
     for seed in range(3):
-        V, _ = kf.simulate_rough(rm, pr, 2000, seed=10 + seed)
+        V, _ = kf.simulate_rough(rm, pr, 2000, seed=10 + seed, scheme="euler")
         y = V + np.random.default_rng(200 + seed).normal(0.0, math.sqrt(pr["R"]), 2000)
         fit = kf.fit_mle(cm, y, dict(kappa=3.0, theta=float(np.mean(y)), xi=0.3, R=pr["R"]))
         pc = fit["params"]
@@ -290,7 +290,7 @@ def test_rough_host():
     t0 = time.perf_counter()
     for seed in range(2):
         pq = dict(P_ROUGH, R=0.01 ** 2)
-        V, _ = kf.simulate_rough(rm, pq, 3000, seed=40 + seed, substeps=1)
+        V, _ = kf.simulate_rough(rm, pq, 3000, seed=40 + seed, substeps=1, scheme="euler")
         y = V + np.random.default_rng(400 + seed).normal(0.0, 0.01, 3000)
         fit = kf.fit_mle(rm, y, dict(pq, kappa=1.0), names=("kappa",))
         du = kf.dual_kalman(rm, dict(pq, kappa=1.0), y, learn=("kappa",))
@@ -312,10 +312,10 @@ def test_rough_host():
     t0 = time.perf_counter()
     for label, pz in (("floor", dict(kappa=3.0, theta=0.04, xi=0.3, R=0.01 ** 2)),
                       ("no floor", dict(kappa=3.0, theta=0.09, xi=0.08, R=0.01 ** 2))):
-        mz = kf.LiftedRoughModel(DT, H=0.12, v0=pz["theta"])
+        mz = kf.LiftedRoughModel(DT, H=0.12, v0=pz["theta"], discretisation="euler")
         vals = []
         for seed in (61, 63):
-            V, _ = kf.simulate_rough(mz, pz, 3000, seed=seed, substeps=1)
+            V, _ = kf.simulate_rough(mz, pz, 3000, seed=seed, substeps=1, scheme="euler")
             y = V + np.random.default_rng(600 + seed).normal(0.0, 0.01, 3000)
             f = kf.fit_mle(mz, y, dict(pz, kappa=1.0), names=("kappa",))
             vals.append(((f["params"]["kappa"] - 3.0) / f["se"]["kappa"], float(np.mean(V < 0))))
@@ -332,6 +332,69 @@ def test_rough_host():
           rec < wn, f"total |deviation| {rec:.2f} SE vs {wn:.2f} SE over {len(DEVIATIONS)} host-seeds")
 
 
+# --- Session G: positivity-preserving data and the exact-moment filter --------
+def newton_z(model, p, y, name="kappa", d=0.15):
+    """
+    One Newton step from the truth, in standard errors: score / sqrt(information),
+    both by central differences of the filter's log-likelihood. Under a correctly
+    specified quasi-likelihood it is ~N(0, 1) across seeds; its mean is the bias
+    of the estimator in SE units, at three filter runs instead of a full MLE.
+    """
+    lo, mid, hi = (kf.kalman_filter(model, dict(p, **{name: p[name] + e}), y)["loglik"] for e in (-d, 0.0, d))
+    score = (hi - lo) / (2 * d)
+    info = -(hi - 2 * mid + lo) / (d * d)
+    return score / math.sqrt(info) if info > 0 else float("nan")
+
+
+def test_rough_positivity_and_qml():
+    print("\nG -- rough host: positivity-preserving data, exact-moment filter, the QML bias")
+    pz = dict(kappa=3.0, theta=0.04, xi=0.3, R=0.01 ** 2)
+    m_eu = kf.LiftedRoughModel(DT, H=0.12, v0=0.04, discretisation="euler")
+    m_ex = kf.LiftedRoughModel(DT, H=0.12, v0=0.04)
+    Ve, _ = kf.simulate_rough(m_eu, pz, 3000, seed=61, substeps=1, scheme="euler")
+    Vq, _ = kf.simulate_rough(m_ex, pz, 3000, seed=61)
+    check("QE: rough variance is never below zero over 3000 days; Euler at the same parameters is, often",
+          float(Vq.min()) >= -1e-12 and float(np.mean(Ve < 0)) > 0.05,
+          f"QE min {Vq.min():.1e}; Euler below zero on {100*np.mean(Ve < 0):.0f}% of days (min {Ve.min():.3f})")
+
+    U0, _ = m_ex.initial(pz)
+    st = m_ex.stepper(pz)
+    Q = m_ex.process_cov(pz, U0)
+    s2 = float(st.s2_const + st.s2_lin @ (st.T @ U0))
+    ev = np.linalg.eigvalsh(Q)
+    check("exact process covariance: PSD, not rank one, and w'Qw is the closed-form Var[V]",
+          ev.min() > -1e-13 * ev.max() and int(np.sum(ev > 1e-8 * ev.max())) > 1
+          and abs(float(m_ex.w @ Q @ m_ex.w) / s2 - 1) < 1e-9,
+          f"rank@1e-8 {int(np.sum(ev > 1e-8 * ev.max()))}, w'Qw/s2 - 1 = {float(m_ex.w @ Q @ m_ex.w) / s2 - 1:.1e}")
+
+    t0 = time.perf_counter()
+    no_floor = dict(kappa=3.0, theta=0.09, xi=0.08, R=0.01 ** 2)
+    m_nf = kf.LiftedRoughModel(DT, H=0.12, v0=0.09)
+    seeds = (61, 63, 65, 67, 69, 71)
+    zs = {"Euler data + Euler filter, floor binds": [], "QE data + exact filter, V near zero": [],
+          "QE data + exact filter, V away from zero": []}
+    for seed in seeds:
+        eps = np.random.default_rng(600 + seed).normal(0.0, 0.01, 3000)
+        V, _ = kf.simulate_rough(m_eu, pz, 3000, seed=seed, substeps=1, scheme="euler")
+        zs["Euler data + Euler filter, floor binds"].append(newton_z(m_eu, pz, V + eps))
+        V, _ = kf.simulate_rough(m_ex, pz, 3000, seed=seed)
+        zs["QE data + exact filter, V near zero"].append(newton_z(m_ex, pz, V + eps))
+        V, _ = kf.simulate_rough(m_nf, no_floor, 3000, seed=seed)
+        zs["QE data + exact filter, V away from zero"].append(newton_z(m_nf, no_floor, V + eps))
+    print("      kappa, one Newton step from the truth, in SE (6 seeds): " + "  ".join(
+        f"[{k}: mean {np.mean(v):+.2f}; {', '.join(f'{z:+.1f}' for z in v)}]" for k, v in zs.items())
+          + f"  ({time.perf_counter()-t0:.0f}s)")
+    e, q, nf = (zs[k] for k in zs)
+    check("Session F's bias reproduced: the variance floor pulls QML kappa DOWN (mean z < -2)",
+          np.mean(e) < -2.0, f"mean z {np.mean(e):+.2f}")
+    check("away from zero, positivity-preserving data + exact moments: QML unbiased (|mean z| < 1, every |z| < 2.5)",
+          abs(np.mean(nf)) < 1.0 and max(abs(z) for z in nf) < 2.5, f"mean z {np.mean(nf):+.2f}")
+    check("near zero the floor's downward bias is gone (mean z > -1); an upward one remains -- flagged, not hidden",
+          np.mean(q) > -1.0, f"mean z {np.mean(q):+.2f}. Not a scheme error: with R = 0.002^2 the same test gives "
+          f"mean -0.65 and z spread ~2 (MLE, 6 seeds) -- where V sits at zero on ~13% of days a Gaussian "
+          f"quasi-likelihood is unreliable; that needs a non-Gaussian filter (open flag)")
+
+
 if __name__ == "__main__":
     print("=" * 74)
     print("Session F / F2 -- Kalman, adaptive and dual Kalman on OU, Heston and rough Heston")
@@ -342,6 +405,7 @@ if __name__ == "__main__":
     test_strict_vs_adaptive()
     test_cir_host()
     test_rough_host()
+    test_rough_positivity_and_qml()
     print("\n" + "=" * 74)
     print(f"{len(PASS)} passed, {len(FAIL)} failed   ({time.perf_counter()-t0:.0f}s)")
     for f in FAIL:

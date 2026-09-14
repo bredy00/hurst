@@ -40,6 +40,9 @@ class MarketSurface:
     iv: np.ndarray
     weight: np.ndarray
     by_expiry: list = field(default=None, repr=False)
+    # Optional short-end skew anchors (calibrate.weights.SkewAnchor): one extra
+    # residual row each, appended after the quotes. Session G.
+    anchors: list = field(default_factory=list, repr=False)
 
     def __post_init__(self):
         self.tau = np.asarray(self.tau, dtype=float)
@@ -163,6 +166,15 @@ def residuals(params, surface, cf_factory, pricer=fo.carr_madan_call,
     # non-finite comes from the MARKET row itself (a NaN quote or weight), which
     # carries no information.
     r[~np.isfinite(r)] = 0.0
+    if surface.anchors:
+        # Anchor rows read the same model vols the quote rows charged, including
+        # the failure charge, so a failed strip cannot make its skew look right.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            mv_eff = np.where(sw > 0, surface.iv + r / np.where(sw > 0, sw, 1.0), mv)
+        mv_eff = np.where(np.isfinite(mv_eff), mv_eff, FAILURE_IV)
+        extra = [np.sqrt(an.weight) * (float(an.a @ mv_eff[an.idx]) - an.target) / an.se
+                 for an in surface.anchors]
+        r = np.concatenate([r, np.asarray(extra, dtype=float)])
     return r, failed
 
 

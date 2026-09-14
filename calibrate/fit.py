@@ -326,8 +326,32 @@ DEFAULT_ROUGH_STARTS = (
 )
 
 
+KERNEL_TOL = 0.01           # max relative kernel error on [1 day, 2 y], strictly below (review target)
+REFINE_N = 32               # N = 24 breaches KERNEL_TOL below H ~ 0.08; N = 32 holds on the whole box
+
+
+def verify_stability(p, surface, N=rh.N_DEFAULT, tail_tol=1e-9):
+    """
+    Post-fit hard check (Session G): re-price every expiry at the fitted
+    parameters with a FRESH Lewis solve -- no frozen grid, no warm refinement --
+    and require every strip to pass the |phi(u - i/2)| <= 1 invariant and the
+    step-halving check. Every solve inside already ran through the stability
+    precondition (rough_heston.StabilityError). A fit that cannot be re-priced
+    cleanly is reported as not ok, never returned as if it were.
+    """
+    worst, failed = 0.0, []
+    for tau, idx in surface.by_expiry:
+        _, info = rh.lewis_prices(surface.k[idx], tau, p, tol=tail_tol, N=N)
+        worst = max(worst, float(info["phi_max"]))
+        if not info["ok"]:
+            failed.append(float(tau))
+    return {"ok": not failed and worst <= 1.0 + rh.PHI_BOUND_TOL, "phi_max": worst,
+            "failed_expiries": failed}
+
+
 def calibrate_rough_heston(surface, starts=DEFAULT_ROUGH_STARTS, tail_tol=1e-9,
-                           N=rh.N_DEFAULT, prior=None, prior_weight=None, **lm_kw):
+                           N=rh.N_DEFAULT, prior=None, prior_weight=None, refine_N=REFINE_N,
+                           **lm_kw):
     """
     Fit the lifted rough Heston with the SAME driver as vanilla Heston -- that
     is the point of the shared `char_func` interface; nothing in
@@ -344,6 +368,14 @@ def calibrate_rough_heston(surface, starts=DEFAULT_ROUGH_STARTS, tail_tol=1e-9,
       that noise by too little;
     - `tail_tol` is the pricer's tail tolerance, not a quadrature tolerance.
 
+    Two hard checks on the answer (Session G), both in the result:
+    - kernel_ok: the lift's kernel error at the FITTED H is below KERNEL_TOL.
+      N = 24 meets it for H >= 0.08 only; a fit that lands lower is polished
+      again from where it stopped with refine_N nodes.
+    - stability: every expiry re-priced from scratch at the fitted parameters
+      passes the invariant checks (verify_stability).
+    res["ok"] is both.
+
     Cost: about 0.1-0.4 s per objective evaluation for a 3-expiry test
     surface and ~1.5 s for the ten-expiry rough surface, so a full multi-start
     fit is minutes, not seconds. `max_seconds` is honoured.
@@ -357,6 +389,16 @@ def calibrate_rough_heston(surface, starts=DEFAULT_ROUGH_STARTS, tail_tol=1e-9,
     res["kernel_error"] = rh.kernel_error(p.H, N)[0]
     res["pricer_stats"] = dict(pricer.pricer.stats)
     res["N"] = N
+    if res["kernel_error"] >= KERNEL_TOL and refine_N and refine_N > N:
+        polish = dict(lm_kw)
+        polish["max_iter"] = min(int(polish.get("max_iter", 20)), 20)
+        again = calibrate_rough_heston(surface, starts=(p,), tail_tol=tail_tol, N=refine_N, prior=prior,
+                                       prior_weight=prior_weight, refine_N=None, **polish)
+        again["refined_from"] = {"N": N, "params": p, "kernel_error": res["kernel_error"]}
+        return again
+    res["kernel_ok"] = res["kernel_error"] < KERNEL_TOL
+    res["stability"] = verify_stability(p, surface, N, tail_tol)
+    res["ok"] = bool(res["kernel_ok"] and res["stability"]["ok"])
     return res
 
 

@@ -132,27 +132,63 @@ class LiftedRoughModel:
     Lifted rough Heston variance, state U in R^N, observed V = v0 + w'U plus noise.
     params: kappa, theta, xi, R (H and v0 fixed at construction: they define the
     factors themselves, so a parameter filter cannot move them without changing
-    what the state means).
+    what the state means -- the H-learning filters rebuild the model per H).
+
+    discretisation:
+      'exact' (default, Session G)  the transition is the exact conditional mean
+                  of the continuous lift over dt and Q its exact conditional
+                  covariance -- the Ito isometry evaluated in closed form
+                  (models.rough_heston.LiftedAffineStep). Q is full rank: within a
+                  day the fast factors decorrelate. With data from the
+                  positivity-preserving simulator, the filter's first two
+                  conditional moments are the data's own.
+      'euler'     Session F's one-step exponential Euler: A = diag(e^{-x dt}) -
+                  kappa dt g w', rank-one Q = xi^2 V dt g g'.
     """
 
     param_names = ("kappa", "theta", "xi", "R")
     positive = ("kappa", "theta", "xi", "R")
 
-    def __init__(self, dt, H=0.12, v0=0.04, N=None):
+    def __init__(self, dt, H=0.12, v0=0.04, N=None, discretisation="exact"):
         import models.rough_heston as rh
+        if discretisation not in ("exact", "euler"):
+            raise ValueError(f"discretisation must be 'exact' or 'euler', got {discretisation!r}")
         self.dt, self.H, self.v0 = float(dt), float(H), float(v0)
         self.N = rh.N_DEFAULT if N is None else int(N)
         self.w, self.x = rh.lift_nodes(self.H, self.N)
         self.E = np.exp(-self.x * self.dt)
         self.g = rh._phi1(-self.x * self.dt)
         self.dim = len(self.w)
+        self.discretisation = discretisation
+        self._steps = {}
+
+    def stepper(self, p, h=None):
+        """
+        The exact-moment step for these parameters. Cached, a few entries deep:
+        one filter run asks for it every step, and the recursive MLE alternates
+        between p and its finite-difference neighbours on every step.
+        """
+        import models.rough_heston as rh
+        h = self.dt if h is None else float(h)
+        key = (p["kappa"], p["theta"], p["xi"], h)
+        st = self._steps.pop(key, None)
+        if st is None:
+            st = rh.LiftedAffineStep(self.w, self.x, self.v0, p["kappa"], p["theta"], p["xi"], h)
+            if len(self._steps) >= 8:
+                self._steps.pop(next(iter(self._steps)))
+        self._steps[key] = st                    # most recent last
+        return st
 
     def transition(self, p):
+        if self.discretisation == "exact":
+            return self.stepper(p).transition_U()
         A = np.diag(self.E) - p["kappa"] * self.dt * np.outer(self.g, self.w)
         b = p["kappa"] * self.dt * (p["theta"] - self.v0) * self.g
         return A, b
 
     def process_cov(self, p, U):
+        if self.discretisation == "exact":
+            return self.stepper(p).cov_U(U)
         V = max(self.v0 + float(self.w @ U), 0.0)
         return (p["xi"] ** 2) * V * self.dt * np.outer(self.g, self.g)
 
@@ -162,6 +198,8 @@ class LiftedRoughModel:
     def initial(self, p):
         A, b = self.transition(p)
         U = np.linalg.solve(np.eye(self.dim) - A, b)
+        if self.discretisation == "exact":
+            return U, self.stepper(p).stationary_cov_U(U)
         P = np.zeros((self.dim, self.dim))
         Q = self.process_cov(p, U)
         for _ in range(4000):              # discrete Lyapunov by iteration; A is stable
@@ -209,10 +247,18 @@ def simulate_cir(kappa, theta, xi, dt, n, v0=None, seed=0, jumps=None, substeps=
     return out
 
 
-def simulate_rough(model, p, n, seed=0, jumps=None, substeps=4, theta_after=None):
+def simulate_rough(model, p, n, seed=0, jumps=None, substeps=4, theta_after=None, scheme="qe"):
     """
-    The lifted variance path on the model's own grid (dt / substeps inner steps,
-    same exponential-Euler scheme). `jumps` maps step -> a jump of that size in
+    The lifted variance path on the model's own grid, dt / substeps inner steps.
+
+    scheme 'qe' (default, Session G): the positivity-preserving step of
+    models.rough_heston.LiftedAffineStep -- V is never negative and never floored,
+    and each inner step matches the continuous lift's conditional mean and
+    variance exactly. scheme 'euler': Session F's exponential Euler with the
+    variance floored at zero where it is used, kept so the bias that floor put
+    into QML can still be reproduced (V < 0 on ~13% of days at xi = 0.3).
+
+    `jumps` maps step -> a jump of that size in
     V, delivered through the driver direction g so that V moves by exactly that
     amount at once and then relaxes through the kernel. `theta_after` =
     (step, theta) moves the long-run level from that step on -- the only kind of
@@ -230,6 +276,22 @@ def simulate_rough(model, p, n, seed=0, jumps=None, substeps=4, theta_after=None
     Us = np.empty((n, model.dim))
     Us[0] = U
     theta = p["theta"]
+    if scheme == "qe":
+        st = rh.LiftedAffineStep(model.w, model.x, model.v0, p["kappa"], theta, p["xi"], h)
+        y = (st.T @ U)[:, None]
+        for k in range(1, n):
+            if theta_after is not None and k == theta_after[0]:
+                theta = theta_after[1]
+                st = rh.LiftedAffineStep(model.w, model.x, model.v0, p["kappa"], theta, p["xi"], h)
+            for _ in range(substeps):
+                y, _v = st.step_y(y, rng)
+            if jumps and k in jumps:
+                U = st.Tinv @ y[:, 0] + g * (jumps[k] / float(model.w @ g))
+                y = (st.T @ U)[:, None]
+            Us[k] = st.Tinv @ y[:, 0]
+        return model.v0 + Us @ model.w, Us
+    if scheme != "euler":
+        raise ValueError(f"scheme must be 'qe' or 'euler', got {scheme!r}")
     for k in range(1, n):
         if theta_after is not None and k == theta_after[0]:
             theta = theta_after[1]
@@ -379,7 +441,9 @@ def kalman_filter(model, p, y, policy=None, x0=None, P0=None):
         out_prior[k] = x
         nu = y[k] - (float(H @ x) + c)
         S = float(H @ P @ H) + R
-        P_adj, R_eff = policy.adjust(nu, S, P, H, R, _shock_direction(model, p, x, H))
+        # the shock direction costs a process_cov; the strict policy never reads it
+        u_dir = None if isinstance(policy, Strict) else _shock_direction(model, p, x, H)
+        P_adj, R_eff = policy.adjust(nu, S, P, H, R, u_dir)
         S_eff = float(H @ P_adj @ H) + R_eff
         K = (P_adj @ H) / S_eff
         x = x + K * nu

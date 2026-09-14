@@ -271,11 +271,306 @@ def simulate(p, tau, n_paths=100_000, n_steps=500, seed=0, N=N_DEFAULT, antithet
     return X
 
 
-def mc_call(p, tau, k, n_paths=100_000, n_steps=500, seed=0, N=N_DEFAULT):
+def mc_call(p, tau, k, n_paths=100_000, n_steps=500, seed=0, N=N_DEFAULT, scheme="euler"):
     """Undiscounted call value in units of F and its standard error; k = log(K/F)."""
-    X = simulate(p, tau, n_paths, n_steps, seed, N)
+    X = simulate(p, tau, n_paths, n_steps, seed, N) if scheme == "euler" else \
+        simulate_qe(p, tau, n_paths, n_steps, seed, N)
     pay = np.maximum(np.exp(X) - math.exp(k), 0.0)
     return float(pay.mean()), float(pay.std(ddof=1) / math.sqrt(len(pay)))
+
+
+# ------------------------------------ G: exact moments and a positivity-preserving step
+def _phi12_nonpos(c):
+    """phi_1, phi_2 of a real array c <= 0 (series near zero, see _phi123)."""
+    p1, p2, _ = _phi123(np.minimum(np.asarray(c, dtype=float), 0.0))
+    return p1, p2
+
+
+class LiftedAffineStep:
+    """
+    Exact conditional moments of the lifted rough Heston over one step h, and the
+    positivity-preserving step built on them (Session G, flag 3).
+
+    Why a new step. The exponential-Euler step draws a Gaussian V-increment of
+    size ~ xi sqrt(V h) (1/h) int_0^h K_N, which at h = 1/1008 and H = 0.12 is
+    15x xi sqrt(V h): variance at theta = 0.04 goes below zero on ~13% of days.
+    The CONTINUOUS lifted model cannot (its kernel is completely monotone; Abi
+    Jaber, Larsson & Pulido 2019), so the negativity is the scheme's, and the
+    floor that hides it is a non-linearity that biased the filter's QML kappa by
+    2-4 SE.
+
+    The model is affine, and in the right coordinates it is diagonal. With
+    D = diag(sqrt w), the drift matrix A = diag(x) + kappa 1 w' satisfies
+    D A D^-1 = diag(x) + kappa sqrt(w) sqrt(w)' = Q diag(lambda) Q' (symmetric), so in
+    y = Q' D U every coordinate is a scalar OU driven by the SAME sqrt(V) dB:
+
+        dy_k = (-lambda_k y_k + alpha_k) dt + xi c_k sqrt(V) dB,   V = v0 + c'y,
+        c = Q' sqrt(w),   alpha = kappa (theta - v0) c.
+
+    Every conditional moment over [0, h] is then a closed-form integral of
+    exponentials against E[V_s], itself a sum of exponentials in s. In
+    particular the covariance is the Ito isometry, evaluated exactly:
+
+        Cov(y_i, y_j) = xi^2 c_i c_j int_0^h e^{-(lambda_i + lambda_j)(h - s)} E[V_s] ds.
+
+    The step (Andersen's QE, adapted to the lift):
+      1. m = E[V_h], s^2 = Var[V_h]: exact, affine in the current state, O(N) per path;
+      2. V_h drawn from Andersen's quadratic-exponential scheme, which matches
+         (m, s^2) exactly and is non-negative by construction;
+      3. the factors take V_h's surprise along the conditional regression
+         direction, plus Gaussian noise ORTHOGONAL to V (its projection on c is
+         identically zero), so V_h = v0 + c'y_h holds exactly. The regression
+         direction and the orthogonal noise shape are evaluated at the
+         stationary state -- V's own moments are exact at every state, the split
+         of its surprise across the factors is exact at stationarity.
+
+    moments_U() gives the exact mean and covariance in the factor coordinates U,
+    which is what the Kalman filter now uses instead of the Euler transition.
+    """
+
+    PSI_C = 1.5       # Andersen's switching value
+
+    def __init__(self, w, x, v0, kappa, theta, xi, h, rho=0.0):
+        self.w, self.x = np.asarray(w, float), np.asarray(x, float)
+        self.v0, self.kappa, self.theta, self.xi, self.h, self.rho = map(
+            float, (v0, kappa, theta, xi, h, rho))
+        sw = np.sqrt(self.w)
+        lam, Q = np.linalg.eigh(np.diag(self.x) + self.kappa * np.outer(sw, sw))
+        lam = np.maximum(lam, 0.0)
+        self.lam = lam
+        self.T = Q.T * sw[None, :]                # y = T U
+        self.Tinv = Q / sw[:, None]               # U = Tinv y
+        c = Q.T @ sw
+        self.c = c
+        kt = self.kappa * (self.theta - self.v0)
+        self.alpha = kt * c
+        h = self.h
+        self.e = np.exp(-lam * h)
+        p1, p2 = _phi12_nonpos(-lam * h)
+        self.mean_add = self.alpha * h * p1       # E[y_h] = e * y + mean_add
+
+        r = lam[:, None] + lam[None, :]
+        I0 = h * _phi12_nonpos(-r * h)[0]                                   # (N, N)
+        J = self._J(r[:, :, None], lam[None, None, :])                      # (N, N, N)
+        L = self._L(I0[:, :, None], J, r[:, :, None], lam[None, None, :])  # (N, N, N)
+        c2 = c * c
+        P0 = self.v0 * I0 + kt * (L @ c2)                                  # state-free part
+        P1 = J * c[None, None, :]                                          # times y_k
+        cc = np.outer(c, c)
+        self._cov_const = self.xi ** 2 * cc * P0
+        self._cov_lin = self.xi ** 2 * cc[:, :, None] * P1                 # (N, N, N)
+        # the same covariance in factor coordinates, affine in U: CU0 + CU1 @ U
+        self._covU_const = self.Tinv @ self._cov_const @ self.Tinv.T
+        self._covU_lin = np.einsum("ia,abk,jb,kl->ijl", self.Tinv, self._cov_lin, self.Tinv, self.T,
+                                   optimize=True)
+        self.s2_const = float(self.xi ** 2 * (c2 @ P0 @ c2))
+        self.s2_lin = self.xi ** 2 * np.einsum("i,j,ijk->k", c2, c2, P1)
+
+        # Moments of the integrated variance and of Z = int sqrt(V) dB, for log S
+        self.EI_const = self.v0 * h + kt * float(c2 @ (h * h * p2))
+        self.EI_lin = c * h * p1
+        I0d = h * p1                                                       # I0(lambda_i)
+        Jd = self._J(lam[:, None], lam[None, :])                           # (N, N)
+        Ld = self._L(I0d[:, None], Jd, lam[:, None], lam[None, :])
+        self.zeta_const = self.xi * float(c2 @ (self.v0 * I0d + kt * (Ld @ c2)))
+        self.zeta_lin = self.xi * c * (c2 @ Jd)
+
+        # Stationary state, and the fixed shapes used to split V's surprise
+        with np.errstate(divide="ignore", invalid="ignore"):
+            self.y_star = np.where(lam > 0, self.alpha / np.where(lam > 0, lam, 1.0), 0.0)
+        self.V_star = self.v0 + float(c @ self.y_star)
+        S_ref = cc * I0                                                    # per unit xi^2 V
+        Sc = S_ref @ c
+        cSc = float(c @ Sc)
+        self.reg = Sc / cSc                                                # c'reg = 1
+        S_perp = S_ref - np.outer(Sc, Sc) / cSc
+        ev, evec = np.linalg.eigh(0.5 * (S_perp + S_perp.T))
+        keep = ev > 1e-12 * max(float(ev.max()), 1e-300)
+        self.L_perp = evec[:, keep] * np.sqrt(ev[keep])[None, :]
+        self.L_perp -= np.outer(self.reg, c @ self.L_perp)                 # exact c-orthogonality
+        self.cSc = cSc
+        # Leverage. Every factor's innovation comes from the same dB, so the
+        # factors orthogonal to V_h are correlated with the return's dZ -- that
+        # is how today's return reaches FUTURE variance through the slow factors.
+        # Drawing that part independently lost the skew (Session G, measured:
+        # +2.0e-3 on a k = +0.08 call at 250 steps). At the reference state,
+        # Cov(y_h, dZ) = xi V c * I0(lambda); its part orthogonal to V_h is
+        # Cov(V_h, dZ) * d_ref, and the joint draw uses b_ref with
+        # L_perp b_ref = d_ref.
+        z_ref = c * I0d
+        d_ref = z_ref / float(c @ z_ref) - self.reg
+        self.b_ref = np.linalg.lstsq(self.L_perp, d_ref, rcond=None)[0]
+
+    # closed-form exponential integrals, all on [0, h]
+    def _J(self, r, lam):
+        """int_0^h e^{-r(h-s)} e^{-lam s} ds = h e^{-min(r, lam) h} phi_1(-|r - lam| h)."""
+        h = self.h
+        return h * np.exp(-np.minimum(r, lam) * h) * _phi12_nonpos(-np.abs(r - lam) * h)[0]
+
+    def _L(self, I0, J, r, lam):
+        """int_0^h e^{-r(h-s)} s phi_1(-lam s) ds = (I0(r) - J(r, lam)) / lam."""
+        h = self.h
+        small = lam * h < 1e-7
+        with np.errstate(divide="ignore", invalid="ignore"):
+            direct = (I0 - J) / np.where(small, 1.0, lam)
+        limit = h * h * _phi12_nonpos(-np.broadcast_to(r, np.broadcast(r, lam).shape) * h)[1]
+        return np.where(small, limit, direct)
+
+    # --- the Kalman filter's view: exact moments in factor coordinates --------
+    def transition_U(self):
+        """E[U_h | U_0] = A U_0 + b, exactly."""
+        A = self.Tinv @ (self.e[:, None] * self.T)
+        b = self.Tinv @ self.mean_add
+        return A, b
+
+    def cov_U(self, U):
+        """
+        Cov[U_h | U_0]: exact for an admissible state, and always clipped to the
+        PSD cone. A FILTERED state can be inadmissible (its implied E[V_s] dips
+        below zero), where the affine formula is indefinite. Clipping only when a
+        check trips was tried first: whether the check trips switches on and off
+        as the parameters move, and one such switch put a 0.34 jump into the
+        log-likelihood between kappa = 3.40 and 3.42 -- enough to break
+        Nelder-Mead and the Hessian SE. Always clipping is continuous.
+        """
+        U = np.asarray(U, float)
+        CU = self._covU_const + self._covU_lin @ U
+        ev, vec = np.linalg.eigh(0.5 * (CU + CU.T))
+        return (vec * np.maximum(ev, 0.0)) @ vec.T
+
+    def stationary_cov_U(self, U):
+        """
+        P solving P = A P A' + Q(U): in y coordinates A is diagonal, so
+        P_ij = Q_ij / (1 - e_i e_j) exactly -- no iteration (the slowest factor
+        decays at ~0.9996 a day, so iterating to 1e-14 would take ~40,000 steps).
+        """
+        Qy = self.T @ self.cov_U(U) @ self.T.T
+        Py = Qy / (1.0 - np.outer(self.e, self.e))
+        return self.Tinv @ Py @ self.Tinv.T
+
+    # --- simulation ---------------------------------------------------------------
+    def qe_draw(self, m, s2, z, u):
+        """Andersen's QE with moments (m, s2): non-negative, both moments exact."""
+        m = np.asarray(m, float)
+        s2 = np.maximum(np.asarray(s2, float), 0.0)
+        out = np.zeros_like(m)
+        pos = m > 0
+        psi = np.where(pos, s2 / np.where(pos, m * m, 1.0), np.inf)
+        quad = pos & (psi <= self.PSI_C)
+        if np.any(quad):
+            ip = 2.0 / np.maximum(psi[quad], 1e-300)
+            b2 = ip - 1.0 + np.sqrt(ip) * np.sqrt(ip - 1.0)
+            a = m[quad] / (1.0 + b2)
+            out[quad] = a * (np.sqrt(b2) + z[quad]) ** 2
+        expo = pos & ~quad
+        if np.any(expo):
+            ps = psi[expo]
+            p = (ps - 1.0) / (ps + 1.0)
+            beta = (1.0 - p) / m[expo]
+            uu = u[expo]
+            out[expo] = np.where(uu <= p, 0.0,
+                                 np.log((1.0 - p) / np.maximum(1.0 - uu, 1e-300)) / beta)
+        return out
+
+    def qe_log_mgf(self, A, m, s2):
+        """
+        log E[exp(A V)] for the QE draw with moments (m, s2), A <= 0 (closed form):
+        quadratic branch V = a (b + Z)^2 gives exp(A a b^2 / (1 - 2 A a)) / sqrt(1 - 2 A a);
+        exponential branch gives p + (1 - p) beta / (beta - A).
+        """
+        m = np.asarray(m, float)
+        s2 = np.maximum(np.asarray(s2, float), 0.0)
+        A = np.minimum(np.asarray(A, float), 0.0)
+        out = np.zeros_like(m)
+        pos = m > 0
+        psi = np.where(pos, s2 / np.where(pos, m * m, 1.0), np.inf)
+        quad = pos & (psi <= self.PSI_C)
+        if np.any(quad):
+            ip = 2.0 / np.maximum(psi[quad], 1e-300)
+            b2 = ip - 1.0 + np.sqrt(ip) * np.sqrt(ip - 1.0)
+            a = m[quad] / (1.0 + b2)
+            d = 1.0 - 2.0 * A[quad] * a
+            out[quad] = A[quad] * a * b2 / d - 0.5 * np.log(d)
+        expo = pos & ~quad
+        if np.any(expo):
+            ps = psi[expo]
+            p = (ps - 1.0) / (ps + 1.0)
+            beta = (1.0 - p) / m[expo]
+            out[expo] = np.log(p + (1.0 - p) * beta / (beta - A[expo]))
+        return out
+
+    def step_y(self, y, rng, with_log_price=False):
+        """
+        One QE step for y of shape (N, n_paths). Returns y_h, V_h and, if asked,
+        (dI, dZ) -- the integrated variance and int sqrt(V) dB over the step.
+        """
+        n = y.shape[1]
+        mu = self.e[:, None] * y + self.mean_add[:, None]
+        m = self.v0 + self.c @ mu
+        s2 = np.maximum(self.s2_const + self.s2_lin @ y, 0.0)
+        z = rng.standard_normal(n)
+        u = rng.random(n)
+        V = self.qe_draw(m, s2, z, u)
+        Vbar = s2 / (self.xi ** 2 * self.cSc)
+        zp = rng.standard_normal((self.L_perp.shape[1], n))
+        scale = self.xi * np.sqrt(Vbar)
+        y_new = mu + self.reg[:, None] * (V - m)[None, :] + (self.L_perp @ zp) * scale[None, :]
+        if not with_log_price:
+            return y_new, V
+        EI = np.maximum(self.EI_const + self.EI_lin @ y, 0.0)
+        dI = np.maximum(EI + 0.5 * self.h * (V - m), 0.0)
+        # Cov(V_h, dZ) is >= 0 for any admissible state and bounded by Cauchy-Schwarz
+        cov = np.clip(self.zeta_const + self.zeta_lin @ y, 0.0, np.sqrt(s2 * EI))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            gam = np.where(s2 > 0, cov / np.where(s2 > 0, s2, 1.0), 0.0)
+            lev = np.where(scale > 0, cov / np.where(scale > 0, scale, 1.0), 0.0)
+        # dZ = gam (V_h - m) + [part correlated with the orthogonal factor noise] + independent rest
+        corr_part = (self.b_ref @ zp) * lev
+        resid = np.maximum(EI - gam * cov - (self.b_ref @ self.b_ref) * lev * lev, 0.0)
+        dZ = gam * (V - m) + corr_part + np.sqrt(resid) * rng.standard_normal(n)
+        # Martingale correction (Andersen 2008): conditional on V_h and the factor
+        # noise, E[exp(dX)] = exp(A (V_h - m) + rho corr_part + c0), with
+        # A = rho gam - rho^2 h / 4 and c0 = -rho^2 EI / 2 + rho^2 resid / 2. The
+        # factor-noise part is Gaussian (its mgf is exact); V_h is not, so its
+        # QE mgf is used.
+        rho = self.rho
+        A = rho * gam - 0.25 * rho * rho * self.h
+        c0 = -0.5 * rho * rho * EI + 0.5 * rho * rho * resid +             0.5 * rho * rho * (self.b_ref @ self.b_ref) * lev * lev
+        drift_fix = -(c0 - A * m + self.qe_log_mgf(A, m, s2))
+        return y_new, V, dI, dZ, drift_fix
+
+    def y_from_U(self, U):
+        return self.T @ U
+
+    def U_from_y(self, y):
+        return self.Tinv @ y
+
+
+def simulate_qe(p, tau, n_paths=100_000, n_steps=500, seed=0, N=N_DEFAULT, return_V=False,
+                martingale=True):
+    """
+    X = log(S/F) under the lifted rough Heston with the positivity-preserving
+    step (LiftedAffineStep). The variance is never negative and is never floored.
+
+        dX = -1/2 dI + rho dZ + sqrt(1 - rho^2) sqrt(dI) dW_perp
+
+    with dI and dZ = int sqrt(V) dB drawn consistently with the V draw: dZ's
+    conditional mean given V_h is the exact regression Cov(V_h, Z)/Var(V_h).
+    """
+    rng = np.random.default_rng(seed)
+    w, x = lift_nodes(p.H, N)
+    st = LiftedAffineStep(w, x, p.v0, p.kappa, p.theta, p.xi, tau / n_steps, p.rho)
+    y = np.zeros((len(w), n_paths))            # U_0 = 0, V_0 = v0
+    X = np.zeros(n_paths)
+    srho = math.sqrt(1.0 - p.rho * p.rho)
+    Vmin = np.inf
+    for _ in range(n_steps):
+        y, V, dI, dZ, fix = st.step_y(y, rng, with_log_price=True)
+        X += -0.5 * dI + p.rho * dZ + srho * np.sqrt(dI) * rng.standard_normal(n_paths)             + (fix if martingale else 0.0)
+        Vmin = min(Vmin, float(V.min()))
+    if return_V:
+        return X, V, Vmin
+    return X
 
 
 # ------------------------------------------- D4: the characteristic function
@@ -319,6 +614,27 @@ def _phi123(c):
 C_STAB = {"etdrk4": 2.0, "exptrap": 12.0}
 
 
+class StabilityError(ValueError):
+    """
+    Raised, never warned: a Riccati solve was requested with a step beyond the
+    measured stability edge for its |u| range, or a solve returned |phi(u)| > 1
+    on the strip -1 <= Im u <= 0, where no martingale model can (Session G).
+
+    Before this, an under-stepped solve was only caught inside lewis_prices,
+    which refines it. Any other caller -- char_func with explicit steps, a
+    Carr-Madan pricer, a study script -- got the number: 120 exptrap steps at
+    u = 1200, H = 0.12, 90 days returned |phi| = 1.21e36 without complaint.
+    """
+
+
+def max_stable_step(p, u_abs_max, scheme="etdrk4", c_stab=None):
+    """Largest step h with h^alpha / Gamma(1+alpha) * (xi (1+|rho|) |u| + kappa) <= C_STAB."""
+    cs = C_STAB[scheme] if c_stab is None else c_stab
+    alpha = p.H + 0.5
+    G = p.xi * (1.0 + abs(p.rho)) * float(u_abs_max) + p.kappa
+    return (cs * math.gamma(1.0 + alpha) / G) ** (1.0 / alpha)
+
+
 def stability_steps(tau, u_abs_max, p, grade=1.0, min_steps=24, c_stab=None,
                     scheme="etdrk4"):
     """
@@ -343,10 +659,7 @@ def stability_steps(tau, u_abs_max, p, grade=1.0, min_steps=24, c_stab=None,
     below one. Its constant is six times better than ETDRK4's, which at
     alpha = 0.62 is eighteen times fewer steps -- not infinitely many.
     """
-    cs = C_STAB[scheme] if c_stab is None else c_stab
-    alpha = p.H + 0.5
-    G = p.xi * (1.0 + abs(p.rho)) * float(u_abs_max) + p.kappa
-    h_max = (cs * math.gamma(1.0 + alpha) / G) ** (1.0 / alpha)
+    h_max = max_stable_step(p, u_abs_max, scheme, c_stab)
     return int(max(min_steps, math.ceil(grade * tau / h_max)))
 
 
@@ -405,7 +718,7 @@ COST_PER_STEP = {"etdrk4": 1.36, "exptrap": 1.0}
 
 
 def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
-                  scheme="etdrk4", c_stab=None):
+                  scheme="etdrk4", c_stab=None, check_stability=True):
     """
     log cf(u) for the lifted rough Heston, from the N-factor Riccati system
 
@@ -440,6 +753,11 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
     never formed factor by factor: each needs a weighted sum of the state (two
     matvecs per step) and the update is one elementwise pass plus a rank-3
     product. The phi-functions depend only on x_i h, computed once per mesh.
+
+    check_stability (default True) is a hard precondition: if the largest step
+    of the mesh exceeds max_stable_step for this |u| range and scheme, the solve
+    is refused with StabilityError before any work is done. Only convergence and
+    blow-up studies that probe beyond the edge on purpose turn it off.
     """
     u = np.atleast_1d(np.asarray(u, dtype=complex))
     v0, kappa, theta, xi, rho, H = p.as_tuple()
@@ -464,6 +782,15 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
 
     mesh = tau * (np.arange(M + 1) / M) ** grade
     hs = np.diff(mesh)
+    if check_stability and scheme in C_STAB:
+        u_abs = float(np.max(np.abs(u)))
+        h_max = max_stable_step(p, u_abs, scheme, c_stab)
+        if float(hs.max()) > h_max * (1.0 + 1e-9):
+            raise StabilityError(
+                f"{scheme}: step {hs.max():.3e} y exceeds the stable step {h_max:.3e} y at "
+                f"|u| <= {u_abs:.0f} (H={H:.3f}, xi={xi:.3f}, rho={rho:.3f}, kappa={kappa:.3f}); "
+                f"needs >= {stability_steps(tau, u_abs, p, grade, min_steps=1, c_stab=c_stab, scheme=scheme)}"
+                f" steps, got {M}")
     c = -np.outer(hs, x)                     # (M, N)
     E = np.exp(c)
     n_u = len(u)
@@ -568,7 +895,7 @@ def choose_scheme(tau, u_abs_max, p, grade=1.0):
     return "exptrap", m_t
 
 
-def char_func(u, tau, p, N=N_DEFAULT, scheme="auto", richardson=False, **kw):
+def char_func(u, tau, p, N=N_DEFAULT, scheme="auto", richardson=False, check_invariant=True, **kw):
     """
     cf(u) = E[exp(i u X_tau)] for the lifted rough Heston.
 
@@ -581,6 +908,11 @@ def char_func(u, tau, p, N=N_DEFAULT, scheme="auto", richardson=False, **kw):
     (4 cf_2M - cf_M) / 3, which cancels the leading O(h^2) error: measured
     against closed-form Heston the order goes from 2.00 to 4.00. The two solves
     also give an error estimate for free, which the Lewis pricer uses.
+
+    check_invariant (default True) is a hard postcondition: for every u on the
+    strip -1 <= Im u <= 0, |cf(u)| <= E[S^(-Im u)] <= 1 by Jensen, for ANY
+    martingale model and any parameters. A value above 1 + PHI_BOUND_TOL there is
+    a broken solve, and raises StabilityError instead of being returned.
     """
     if scheme == "auto":
         scheme, m = choose_scheme(tau, float(np.max(np.abs(u))), p, kw.get("grade", 1.0))
@@ -598,6 +930,15 @@ def char_func(u, tau, p, N=N_DEFAULT, scheme="auto", richardson=False, **kw):
         out = (4.0 * _safe_exp(b) - _safe_exp(a)) / 3.0
     else:
         out = _safe_exp(log_char_func(u, tau, p, N=N, scheme=scheme, **kw))
+    if check_invariant:
+        ua = np.atleast_1d(np.asarray(u, dtype=complex))
+        strip = (ua.imag <= 1e-12) & (ua.imag >= -1.0 - 1e-12)
+        if np.any(strip):
+            worst = float(np.max(np.abs(np.atleast_1d(out)[strip])))
+            if worst > 1.0 + PHI_BOUND_TOL:
+                raise StabilityError(
+                    f"|cf| = {worst:.3e} > 1 on the strip -1 <= Im u <= 0 at tau = {tau:.4f} "
+                    f"(H={p.H:.3f}, xi={p.xi:.3f}): a broken solve, not a model value")
     if np.ndim(u) == 0:
         return out.reshape(())[()]
     return out

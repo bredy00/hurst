@@ -439,6 +439,13 @@ def h_lift():
            e_day < 0.01, unit="rel", note="max relative; H = 0.12")
     record("Markovian lift", "kernel error on [1 hour, 2 y]", e_hour, 0.01, e_hour < 0.01,
            unit="rel", note="a one-day option lives here; 12% below 5 minutes")
+    hs = np.linspace(0.08, 0.5, 22)
+    e24 = max(rh.kernel_error(h, 24)[0] for h in hs)
+    record("Markovian lift", "kernel error, N=24, worst over H in [0.08, 0.5]", e24, 0.01, e24 < 0.01,
+           unit="rel", note=f"H = 0.05: {rh.kernel_error(0.05, 24)[0]:.4f}, H = 0.02: {rh.kernel_error(0.02, 24)[0]:.4f} -- above 1%")
+    e32 = max(rh.kernel_error(h, 32)[0] for h in np.linspace(0.02, 0.5, 25))
+    record("Markovian lift", "kernel error, N=32, worst over the whole H box [0.02, 0.5]", e32, 0.01,
+           e32 < 0.01, unit="rel", note="what calibration refits with when a fit lands below H = 0.08")
     w, x = rh.lift_nodes(0.12)
     z = np.exp(np.linspace(math.log(0.1), math.log(100), 200))
     lap = float(np.max(np.abs(rh.laplace_approx(z, w, x) - rh.laplace_kernel(z, 0.12))
@@ -513,9 +520,17 @@ def h_rough_robustness():
     run = rh.RoughHestonParams(0.0200, 0.1868, 0.8828, 0.6347, -0.5574, 0.0200)
 
     u = np.linspace(0.0, 1200.0, 1200) - 0.5j
-    bad = float(np.max(np.abs(rh.char_func(u, 90 / 365, Pr, scheme="exptrap", steps=120))))
-    record("Rough robustness", "exptrap at 120 steps, u to 1200 (NOT unconditionally stable)", bad,
+    bad = float(np.max(np.abs(rh.char_func(u, 90 / 365, Pr, scheme="exptrap", steps=120,
+                                           check_stability=False, check_invariant=False))))
+    record("Rough robustness", "exptrap at 120 steps, u to 1200, guards off (NOT unconditionally stable)", bad,
            1.0, bad > 1.0, note="|phi(u - i/2)| must be <= 1; kept to prove the constraint")
+    try:
+        rh.char_func(u, 90 / 365, Pr, scheme="exptrap", steps=120)
+        refused = 0.0
+    except rh.StabilityError:
+        refused = 1.0
+    record("Rough robustness", "stability constants enforced: the same solve raises StabilityError", refused,
+           1.0, refused == 1.0, note="hard precondition since Session G; |phi| <= 1 is a hard postcondition")
     m_t = max(rh.AUTO_EXPTRAP_STEPS, rh.stability_steps(90 / 365, 1200.0, Pr, scheme="exptrap"))
     good = float(np.max(np.abs(rh.char_func(u, 90 / 365, Pr, scheme="exptrap", steps=m_t))))
     record("Rough robustness", "stability-sized exptrap, same u range: max |phi(u - i/2)|", good,
@@ -834,6 +849,13 @@ HISTORY = ROOT / "captures" / "healthcheck_history.jsonl"
 TREND_RULES = {
     "Jacobian condition number at the solution": {"median_max": 100.0, "spike": 1e4},
     "fitted RMSE on clean data": {"mean_max": 5e-9},   # recorded in vol points already
+    # Session G targets (analytics review of 2026-09-15). Timing is compared only
+    # against runs on the SAME host: a CI runner is not this laptop.
+    "rough objective evaluation, 10 expiries x 13 strikes": {"mean_max": 0.75, "window": 10,
+                                                             "same_host": True},
+    "recursive MLE (Ljung) distance from the MLE": {"max_max": 2.0, "window": 20},
+    "kernel error, N=24, t in [1 day, 2 y]": {"max_max": 0.01},
+    "kernel error on [1 hour, 2 y]": {"max_max": 0.01},
 }
 
 
@@ -850,7 +872,7 @@ def append_history(seconds):
     """One line per run: timestamp, git sha, and every numeric measurement."""
     import datetime
     row = {"ts": datetime.datetime.now().isoformat(timespec="seconds"),
-           "sha": _git_sha(), "seconds": round(seconds, 1),
+           "sha": _git_sha(), "seconds": round(seconds, 1), "host": platform.node(),
            "n_ok": sum(1 for r in RESULTS if r["ok"]), "n": len(RESULTS),
            "measured": {r["name"]: r["measured"] for r in RESULTS
                         if isinstance(r["measured"], (int, float, np.integer, np.floating))
@@ -879,8 +901,12 @@ def trend_report(rows=None):
         return []
     names = sorted({k for r in rows for k in r["measured"]})
     out = []
+    here = platform.node()
     for name in names:
-        v = np.array([r["measured"][name] for r in rows if name in r["measured"]], dtype=float)
+        rule = TREND_RULES.get(name, {})
+        use = [r for r in rows if name in r["measured"]
+               and (not rule.get("same_host") or r.get("host", here) == here)]
+        v = np.array([r["measured"][name] for r in use], dtype=float)
         if v.size == 0:
             continue
         mean, std, last = float(v.mean()), float(v.std(ddof=1)) if v.size > 1 else 0.0, float(v[-1])
@@ -891,13 +917,15 @@ def trend_report(rows=None):
         flags = []
         if abs(z) > 3.0:
             flags.append(f"drift z={z:+.1f}")
-        rule = TREND_RULES.get(name, {})
-        if "median_max" in rule and float(np.median(v)) > rule["median_max"]:
-            flags.append(f"median {np.median(v):.3g} > {rule['median_max']:g}")
-        if "spike" in rule and float(v.max()) > rule["spike"]:
-            flags.append(f"spike {v.max():.3g} > {rule['spike']:g}")
-        if "mean_max" in rule and mean > rule["mean_max"]:
-            flags.append(f"rolling mean {mean:.3g} > {rule['mean_max']:g}")
+        win = v[-int(rule["window"]):] if "window" in rule else v
+        if "median_max" in rule and float(np.median(win)) > rule["median_max"]:
+            flags.append(f"median {np.median(win):.3g} > {rule['median_max']:g}")
+        if "spike" in rule and float(win.max()) > rule["spike"]:
+            flags.append(f"spike {win.max():.3g} > {rule['spike']:g}")
+        if "mean_max" in rule and float(win.mean()) > rule["mean_max"]:
+            flags.append(f"rolling mean {win.mean():.3g} > {rule['mean_max']:g} (last {win.size})")
+        if "max_max" in rule and float(win.max()) >= rule["max_max"]:
+            flags.append(f"max {win.max():.3g} >= {rule['max_max']:g} (last {win.size})")
         out.append({"name": name, "n": int(v.size), "mean": mean, "std": std,
                     "median": float(np.median(v)), "last": last, "z": z, "flags": flags})
     return out

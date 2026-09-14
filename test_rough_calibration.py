@@ -225,6 +225,80 @@ def test_skew_term_structure():
           f"{r_r['rmse_vol']*100:.3f} vs {r_h['rmse_vol']*100:.3f} vol points")
 
 
+# --- Session G: weighting for H --------------------------------------------------
+def test_weighting_for_h():
+    """
+    The analytics review asked for inverse-variance or hybrid weights that anchor
+    the short-end skew. Mechanics first (the anchor IS the local skew estimator,
+    rows are appended correctly, failures reach the anchors), then the study's
+    conclusions, asserted on its numbers.
+    """
+    print("\nG -- calibration weights for H: vega^2, inverse variance, hybrid skew anchors")
+    import calibrate.weights as wt
+    import study_h_weighting as shw
+    from calibrate.objective import residuals
+
+    F, tau, s_atm = 1.0, 7 / 365, 0.16
+    ks = np.linspace(-2.5, 2.5, 21) * s_atm * math.sqrt(tau)
+    zs = ks / (s_atm * math.sqrt(tau))
+    ivs = s_atm - 1.1 * ks + 5.0 * ks ** 2 - 30.0 * ks ** 3
+    qw = 1.0 / (0.002 + 0.001 * np.abs(zs)) ** 2
+    a, _ = wt.skew_functional(ks, zs, qw, window=1.5)
+    ref, _, _ = vc.atm_skew_from_slice(ks, ivs, zs=zs, weights=qw, window=1.5)
+    check("the anchor's linear functional reproduces atm_skew_from_slice exactly",
+          abs(float(a @ ivs) - ref) < 1e-10, f"{float(a @ ivs):.12f} vs {ref:.12f}")
+
+    tau_v = np.repeat([2 / 365, 30 / 365, 1.0], 7)
+    w = np.r_[np.full(7, 1.0), np.full(7, 5.0), np.full(7, 50.0)]
+    wb = wt.balance_by_expiry(tau_v, w)
+    sums = [wb[tau_v == t].sum() for t in np.unique(tau_v)]
+    check("balance_by_expiry: equal total per expiry, grand total kept",
+          np.allclose(sums, sums[0]) and abs(wb.sum() - w.sum()) < 1e-9, f"{np.round(sums, 3)}")
+
+    S = build_surface(np.array([2, 14, 90]) / 365.0, n_k=7)
+    sd = np.full(len(S), 0.005)
+    anchors = wt.build_anchors(S.tau, S.k, S.iv, sd, window=3.5)
+    SA = MarketSurface(S.tau, S.k, S.iv, np.ones(len(S)), anchors=anchors)
+    fac = lambda q, t: rh.cf_factory(q, t)
+    pricer = rh.RoughPricer()
+    r_true, _ = residuals(TRUE, SA, fac, pricer=pricer)
+    q_noise = float(np.max(np.abs(r_true[:len(S)])))
+    check("anchor rows are appended (one per expiry <= 30 d) and are pricing noise at the generating parameters",
+          len(r_true) == len(S) + 2 and float(np.max(np.abs(r_true[len(S):]))) < 1e-2,
+          f"{len(anchors)} anchors, max anchor residual {float(np.max(np.abs(r_true[len(S):]))):.1e} "
+          f"(quote rows {q_noise:.1e}: the market was priced with a different quadrature)")
+    wrong = rh.RoughHestonParams(0.04, 2.0, 0.045, 0.5, -0.7, 0.30)
+    r_w, _ = residuals(wrong, SA, fac, pricer=pricer)
+    mv = S.iv + r_w[:len(S)]
+    manual = [math.sqrt(an.weight) * (float(an.a @ mv[an.idx]) - an.target) / an.se for an in anchors]
+    check("an anchor residual is sqrt(weight) (model skew - market skew) / SE, recomputed by hand",
+          np.allclose(r_w[len(S):], manual, atol=1e-10) and abs(r_w[len(S)]) > 1.0,
+          f"H = 0.30 gives short-end anchor residuals {np.round(r_w[len(S):], 2)}")
+
+    out = shw.run(verbose=False)
+    design, spread = "recorder surface, 10 expiries x 9", "spread-based noise (tick + 2.5% of value)"
+    homo = "homoscedastic 0.5 vp noise"
+    g = lambda sc, nz=spread: out[(design, nz, sc)]
+    rms = lambda a_, key: math.hypot(a_["se_H"], a_[key])
+    print("      recorder surface, spread noise, RMS error in H [long end wrong / short end wrong]: " + "  ".join(
+        f"{sc}: {rms(g(sc), 'bias_H'):.3f}/{rms(g(sc), 'bias_H_short'):.3f}"
+        for sc in ("vega2", "inverse_variance", "hybrid", "hybrid x25")))
+    check("inverse variance cuts SE(H) at least 4x against vega^2 (both noise models)",
+          g("inverse_variance")["se_H"] < g("vega2")["se_H"] / 4
+          and g("inverse_variance", homo)["se_H"] < g("vega2", homo)["se_H"] / 4,
+          f"{g('vega2')['se_H']:.4f} -> {g('inverse_variance')['se_H']:.4f} (spread); "
+          f"{g('vega2', homo)['se_H']:.4f} -> {g('inverse_variance', homo)['se_H']:.4f} (0.5 vp)")
+    corrs = [abs(v["corr_H_xi"]) for v in out.values()]
+    check("corr(H, xi) > 0.9 under EVERY scheme and design: re-weighting cannot remove it",
+          min(corrs) > 0.9, f"min |corr| {min(corrs):.3f} over {len(corrs)} cases")
+    worst = {sc: max(rms(g(sc), "bias_H"), rms(g(sc), "bias_H_short")) for sc in ("vega2", "inverse_variance", "hybrid x25")}
+    check("skew-anchored hybrid has the best worst case over the two misspecifications",
+          worst["hybrid x25"] < worst["inverse_variance"] and worst["hybrid x25"] < worst["vega2"],
+          ", ".join(f"{k}: {v:.3f}" for k, v in worst.items()))
+    check("...but inverse variance wins when only the long end is wrong: anchors cost precision",
+          rms(g("inverse_variance"), "bias_H") < rms(g("hybrid x25"), "bias_H"))
+
+
 if __name__ == "__main__":
     print("=" * 74)
     print("Session E -- rough Heston calibration and the skew comparison")
@@ -233,6 +307,7 @@ if __name__ == "__main__":
     test_plant_and_recover()
     test_h_identifiability()
     test_skew_term_structure()
+    test_weighting_for_h()
     print("\n" + "=" * 74)
     print(f"{len(PASS)} passed, {len(FAIL)} failed   ({time.perf_counter()-t0:.0f}s)")
     for f in FAIL:

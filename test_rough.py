@@ -186,7 +186,10 @@ def test_reduces_to_heston():
         ex = heston_cf(uu, tau, HP)
         errs = {}
         for M in (50, 100, 200):
-            errs[M] = float(np.max(np.abs(rh.char_func(uu, tau, PH, N=1, steps=M, scheme="etdrk4") - ex)))
+            # a convergence-ORDER study: 50 steps sits just past the operating
+            # stability constant at u = 60 on purpose, so the guard is off here
+            errs[M] = float(np.max(np.abs(rh.char_func(uu, tau, PH, N=1, steps=M, scheme="etdrk4",
+                                                       check_stability=False) - ex)))
         check(f"tau = {tau:.4f}: ETDRK4 at 200 steps within 1e-9 of Heston",
               errs[200] < 1e-9, f"{errs[200]:.2e}")
         if errs[200] > 1e-13:
@@ -196,10 +199,12 @@ def test_reduces_to_heston():
     tau = 0.5
     uu = np.linspace(0.0, 60.0, 121) - 1.5j
     ex = heston_cf(uu, tau, HP)
-    e_tr = {M: float(np.max(np.abs(rh.char_func(uu, tau, PH, N=1, steps=M, scheme="exptrap") - ex)))
+    e_tr = {M: float(np.max(np.abs(rh.char_func(uu, tau, PH, N=1, steps=M, scheme="exptrap",
+                                                 check_stability=False) - ex)))
             for M in (50, 200)}
     e_ri = {M: float(np.max(np.abs(rh.char_func(uu, tau, PH, N=1, steps=M, scheme="exptrap",
-                                                 richardson=True) - ex))) for M in (50, 200)}
+                                                 richardson=True, check_stability=False) - ex)))
+            for M in (50, 200)}
     o_tr = math.log2(e_tr[50] / e_tr[200]) / 2
     o_ri = math.log2(e_ri[50] / e_ri[200]) / 2
     check("implicit exponential-trapezoidal scheme is second order", 1.9 < o_tr < 2.1,
@@ -340,9 +345,33 @@ def test_solver_robustness():
     print("\nE0 -- solver robustness (found by the Session E calibration)")
     u = np.linspace(0.0, 1200.0, 1200) - 0.5j
     tau = 90 / 365
-    bad = float(np.max(np.abs(rh.char_func(u, tau, P, scheme="exptrap", steps=120))))
+    bad = float(np.max(np.abs(rh.char_func(u, tau, P, scheme="exptrap", steps=120,
+                                           check_stability=False, check_invariant=False))))
     check("exptrap at 120 steps blows up at u = 1200, 90 d, H = 0.12 -- NOT unconditionally stable",
-          bad > 1e3, f"max |phi(u - i/2)| = {bad:.1e}, must be <= 1")
+          bad > 1e3, f"max |phi(u - i/2)| = {bad:.1e}, must be <= 1 (both guards off to show it)")
+
+    # Session G: the measured constants are now HARD assertions
+    need = rh.stability_steps(tau, 1200.0, P, min_steps=1, scheme="exptrap")
+    try:
+        rh.char_func(u, tau, P, scheme="exptrap", steps=120)
+        refused, msg = False, "returned a value"
+    except rh.StabilityError as exc:
+        refused, msg = True, str(exc)
+    check("the precondition refuses the under-stepped solve before doing any work (StabilityError)",
+          refused and f"needs >= {need}" in msg, msg[:140])
+    try:
+        rh.char_func(u, tau, P, scheme="exptrap", steps=120, check_stability=False)
+        caught = False
+    except rh.StabilityError as exc:
+        caught = "strip" in str(exc)
+    check("with the precondition off, the |phi| <= 1 postcondition still refuses the result",
+          caught)
+    for sc in ("etdrk4", "exptrap"):
+        h_edge = rh.max_stable_step(P, 1200.0, sc)
+        M_ok = rh.stability_steps(tau, 1200.0, P, min_steps=1, scheme=sc)
+        ok_edge = abs(tau / M_ok - h_edge) <= h_edge and tau / M_ok <= h_edge * (1 + 1e-9)
+        check(f"{sc}: stability_steps and the guard use the same edge (step {tau / M_ok:.2e} <= {h_edge:.2e})",
+              ok_edge)
     worst = 0.0
     for q in (P, rh.RoughHestonParams(0.02, 0.1868, 0.8828, 0.6347, -0.5574, 0.02)):
         for d_ in (30, 90):
@@ -437,6 +466,101 @@ def test_monte_carlo():
           f"{gaps[0][1]:+.2e} -> {gaps[1][1]:+.2e} (full-truncation bias, not a cf error)")
 
 
+def test_positivity_scheme():
+    """
+    Session G, flag 3: the positivity-preserving step (LiftedAffineStep).
+    Its closed forms against brute-force quadrature, its draws against its own
+    exact moments -- one step, and 252 steps from far out of equilibrium -- and
+    its prices against the Fourier cf on the case where Euler is most biased.
+    """
+    print("\nG -- positivity-preserving lifted step: exact moments, QE draw, pricing")
+    from scipy import integrate
+    w, x = rh.lift_nodes(0.12, 24)
+    v0, kap, th, xi, h = 0.04, 3.0, 0.04, 0.3, 1 / 252
+    st = rh.LiftedAffineStep(w, x, v0, kap, th, xi, h)
+    U_star = st.U_from_y(st.y_star[:, None])[:, 0]
+    g = rh._phi1(-x * h)
+    U0 = U_star + g * ((0.08 - st.V_star) / float(w @ g))          # V0 = 2 theta, shock through the driver
+    y0 = st.T @ U0
+    lam, c = st.lam, st.c
+
+    def EV(s_):
+        return v0 + float(c @ (np.exp(-lam * s_) * y0 + st.alpha * (-np.expm1(-lam * s_)) / lam))
+
+    def integ(r):
+        pts = sorted(set([0.0, h] + [h - h * 10.0 ** (-j) for j in range(1, 9)] + [h * 10.0 ** (-j) for j in range(1, 9)]))
+        return sum(integrate.quad(lambda s_: math.exp(-r * (h - s_)) * EV(s_), a, b, epsrel=1e-12, limit=200)[0]
+                   for a, b in zip(pts[:-1], pts[1:]))
+    Cy = st._cov_const + st._cov_lin @ y0
+    worst = 0.0
+    for i, j in ((0, 0), (0, 23), (5, 11), (12, 12), (17, 3), (23, 23)):
+        q = xi ** 2 * c[i] * c[j] * integ(lam[i] + lam[j])
+        worst = max(worst, abs(Cy[i, j] - q) / abs(q))
+    check("covariance closed form (the Ito isometry in eigen-coordinates) = quadrature, 1e-10",
+          worst < 1e-10, f"worst relative error {worst:.1e}")
+    ei = st.EI_const + st.EI_lin @ y0
+    ei_q = integrate.quad(EV, 0, h, epsrel=1e-13, points=[h * 1e-6, h * 1e-3])[0]
+    check("E[integrated variance] closed form = quadrature, 1e-10", abs(ei - ei_q) / ei_q < 1e-10,
+          f"{ei:.12e} vs {ei_q:.12e}")
+
+    n = 400_000
+    Yn, V = st.step_y(np.repeat(y0[:, None], n, axis=1), np.random.default_rng(3))
+    m = v0 + c @ (st.e * y0 + st.mean_add)
+    s2 = st.s2_const + st.s2_lin @ y0
+    check("one step from V0 = 2 theta: E[V_h] matches the exact mean (4 SE)",
+          abs(V.mean() - m) < 4 * math.sqrt(s2 / n), f"{V.mean():.6f} vs {m:.6f}")
+    check("...and Var[V_h] matches the exact variance to 3%", abs(V.var() / s2 - 1) < 0.03,
+          f"{100*(V.var()/s2-1):+.2f}%")
+    check("V_h is never negative (a QE draw, not a floor)", float(V.min()) >= 0.0, f"min {V.min():.2e}")
+    check("V_h = v0 + c'y_h exactly: the surprise is split without leaking into V",
+          float(np.max(np.abs(v0 + c @ Yn - V))) < 1e-12)
+
+    st2 = rh.LiftedAffineStep(w, x, 0.02, kap, 0.06, xi, 1 / 1008)
+    A, b = st2.transition_U()
+    n2 = 40_000
+    yy = np.zeros((24, n2))
+    mu, C = np.zeros(24), np.zeros((24, 24))
+    rng = np.random.default_rng(4)
+    rows, vmin = [], np.inf
+    for k in range(1, 253):
+        C = A @ C @ A.T + st2.cov_U(mu)
+        mu = A @ mu + b
+        yy, Vk = st2.step_y(yy, rng)
+        vmin = min(vmin, float(Vk.min()))
+        if k in (21, 252):
+            Vm, Vv = 0.02 + w @ mu, float(w @ C @ w)
+            rows.append((k, (Vk.mean() - Vm) / math.sqrt(Vv / n2), Vk.var() / Vv - 1))
+    check("252 steps from v0 = 0.02 towards theta = 0.06: mean within 4 SE, variance within 5% of exact",
+          all(abs(z) < 4 and abs(r) < 0.05 for _, z, r in rows) and vmin >= 0.0,
+          "; ".join(f"step {k}: z {z:+.1f}, var {100*r:+.1f}%" for k, z, r in rows) + f"; min V {vmin:.1e}")
+
+    tau = 0.25
+    ks = np.array([-0.10, 0.0, 0.08])
+    f, _ = rh.call_prices(ks, tau, P, tol=1e-10, steps_mult=2.0)
+    t0 = time.perf_counter()
+    Xq = rh.simulate_qe(P, tau, 100_000, 250, seed=5)
+    tq = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    Xe = rh.simulate(P, tau, 100_000, 250, seed=5)
+    te = time.perf_counter() - t0
+    Sq, Se = np.exp(Xq), np.exp(Xe)
+    zq, ze = [], []
+    for kk, fk in zip(ks, f):
+        for S_, out in ((Sq, zq), (Se, ze)):
+            pay = np.maximum(S_ - math.exp(kk), 0.0)
+            out.append(((pay.mean() - fk), pay.std() / math.sqrt(len(pay))))
+    print("      250 steps, xi = 0.5, H = 0.12: " + "  ".join(
+        f"k={kk:+.2f}: QE {gq:+.1e} ({gq/sq:+.1f} SE) vs Euler {ge:+.1e} ({ge/se_:+.1f} SE)"
+        for kk, (gq, sq), (ge, se_) in zip(ks, zq, ze)) + f"  ({tq:.0f}s / {te:.0f}s)")
+    check("QE prices match the Fourier cf within 4.5 SE at every strike (250 steps)",
+          all(abs(gq / sq) < 4.5 for gq, sq in zq))
+    check("QE's worst price bias is < 1/3 of full-truncation Euler's at the same steps",
+          max(abs(gq) for gq, _ in zq) < max(abs(ge) for ge, _ in ze) / 3.0,
+          f"{max(abs(gq) for gq, _ in zq):.1e} vs {max(abs(ge) for ge, _ in ze):.1e}")
+    check("QE is a martingale: E[S] = F within 3 SE", abs(Sq.mean() - 1) < 3 * Sq.std() / math.sqrt(len(Sq)),
+          f"{Sq.mean() - 1:+.1e}")
+
+
 if __name__ == "__main__":
     print("=" * 74)
     print("Session D -- Volterra kernel, Markovian lift, lifted rough Heston cf")
@@ -451,6 +575,7 @@ if __name__ == "__main__":
     test_pricing_wrapper()
     test_solver_robustness()
     test_monte_carlo()
+    test_positivity_scheme()
     print("\n" + "=" * 74)
     print(f"{len(PASS)} passed, {len(FAIL)} failed   ({time.perf_counter()-t0:.0f}s)")
     for f in FAIL:
