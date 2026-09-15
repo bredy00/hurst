@@ -280,10 +280,32 @@ def mc_call(p, tau, k, n_paths=100_000, n_steps=500, seed=0, N=N_DEFAULT, scheme
 
 
 # ------------------------------------ G: exact moments and a positivity-preserving step
+def _phi_k(c, k):
+    """
+    phi_1 or phi_2 of a real array c <= 0, and only that one: Horner series below
+    |c| = 0.1 (ten terms, exact to rounding there), expm1 above. _phi123 computes
+    all three on the full array, which was 64% of a LiftedAffineStep build.
+    """
+    c = np.minimum(np.asarray(c, dtype=float), 0.0)
+    out = np.empty_like(c)
+    small = np.abs(c) < 0.1
+    if np.any(small):
+        cs = c[small]
+        acc = np.full_like(cs, 1.0 / _FACT[k + 11])
+        for j in range(10, -1, -1):
+            acc = acc * cs + 1.0 / _FACT[j + k]
+        out[small] = acc
+    big = ~small
+    if np.any(big):
+        cb = c[big]
+        e = np.expm1(cb)
+        out[big] = e / cb if k == 1 else (e - cb) / (cb * cb)
+    return out
+
+
 def _phi12_nonpos(c):
-    """phi_1, phi_2 of a real array c <= 0 (series near zero, see _phi123)."""
-    p1, p2, _ = _phi123(np.minimum(np.asarray(c, dtype=float), 0.0))
-    return p1, p2
+    """phi_1, phi_2 of a real array c <= 0 (series near zero, see _phi_k)."""
+    return _phi_k(c, 1), _phi_k(c, 2)
 
 
 class LiftedAffineStep:
@@ -350,7 +372,7 @@ class LiftedAffineStep:
         self.mean_add = self.alpha * h * p1       # E[y_h] = e * y + mean_add
 
         r = lam[:, None] + lam[None, :]
-        I0 = h * _phi12_nonpos(-r * h)[0]                                   # (N, N)
+        I0 = h * _phi_k(-r * h, 1)                                           # (N, N)
         J = self._J(r[:, :, None], lam[None, None, :])                      # (N, N, N)
         L = self._L(I0[:, :, None], J, r[:, :, None], lam[None, None, :])  # (N, N, N)
         c2 = c * c
@@ -405,7 +427,7 @@ class LiftedAffineStep:
     def _J(self, r, lam):
         """int_0^h e^{-r(h-s)} e^{-lam s} ds = h e^{-min(r, lam) h} phi_1(-|r - lam| h)."""
         h = self.h
-        return h * np.exp(-np.minimum(r, lam) * h) * _phi12_nonpos(-np.abs(r - lam) * h)[0]
+        return h * np.exp(-np.minimum(r, lam) * h) * _phi_k(-np.abs(r - lam) * h, 1)
 
     def _L(self, I0, J, r, lam):
         """int_0^h e^{-r(h-s)} s phi_1(-lam s) ds = (I0(r) - J(r, lam)) / lam."""
@@ -413,7 +435,7 @@ class LiftedAffineStep:
         small = lam * h < 1e-7
         with np.errstate(divide="ignore", invalid="ignore"):
             direct = (I0 - J) / np.where(small, 1.0, lam)
-        limit = h * h * _phi12_nonpos(-np.broadcast_to(r, np.broadcast(r, lam).shape) * h)[1]
+        limit = h * h * _phi_k(-np.broadcast_to(r, np.broadcast(r, lam).shape) * h, 2)
         return np.where(small, limit, direct)
 
     # --- the Kalman filter's view: exact moments in factor coordinates --------
@@ -538,6 +560,62 @@ class LiftedAffineStep:
         c0 = -0.5 * rho * rho * EI + 0.5 * rho * rho * resid +             0.5 * rho * rho * (self.b_ref @ self.b_ref) * lev * lev
         drift_fix = -(c0 - A * m + self.qe_log_mgf(A, m, s2))
         return y_new, V, dI, dZ, drift_fix
+
+    def integrated_moments(self, n_panels=36, order=16):
+        """
+        Affine coefficients of the joint conditional moments of the factors and the
+        integrated variance I = int_0^h V_s ds over the step (Session G, realised
+        variance observations). With tau = h - r and G(tau) = sum_k c_k^2 (1 - e^{-lambda_k tau}) / lambda_k,
+
+            I - E[I]          = xi int_0^h G(h - r) sqrt(V_r) dB_r
+            Cov(y_i(h), I)    = xi^2 c_i int_0^h e^{-lambda_i tau} G(tau) E[V_{h - tau}] dtau
+            Var(I)            = xi^2 int_0^h G(tau)^2 E[V_{h - tau}] dtau
+
+        and E[V_r] is affine in the starting state, so each is const + lin @ y0. The
+        integrals are evaluated once by Gauss-Legendre on panels graded
+        geometrically towards both ends of the step (fast factors live within
+        1/lambda of either end); check_quadrature() compares the same grid with the
+        closed-form factor covariance. Cached on the step.
+        """
+        if getattr(self, "_int_mom", None) is not None:
+            return self._int_mom
+        import pricing.fourier as fo
+        h, lam, c = self.h, self.lam, self.c
+        gl_x, gl_w = fo._leggauss(order)
+        g = np.geomspace(1e-11, 0.5, n_panels // 2)
+        edges = np.unique(np.concatenate([[0.0, h], h * g, h - h * g]))
+        lo, hi = edges[:-1], edges[1:]
+        half = 0.5 * (hi - lo)
+        tau = (half[:, None] * (gl_x[None, :] + 1.0) + lo[:, None]).ravel()
+        wq = (half[:, None] * gl_w[None, :]).ravel()
+        r = h - tau
+        kt = self.kappa * (self.theta - self.v0)
+        # E[V_r] = E0(r) + sum_m y0_m B_m(r)
+        E0 = self.v0 + ((kt * c * c)[None, :] * (r[:, None] * _phi_k(-np.outer(r, lam), 1))).sum(axis=1)
+        B = c[None, :] * np.exp(-np.outer(r, lam))                        # (Q, N)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            gk = tau[:, None] * _phi_k(-np.outer(tau, lam), 1)            # (1 - e^{-lam tau}) / lam
+        G = gk @ (c * c)                                                  # (Q,)
+        El = np.exp(-np.outer(tau, lam))                                  # (Q, N)
+        xi2 = self.xi ** 2
+        wG = wq * G
+        C_const = xi2 * c * ((El * (wG * E0)[:, None]).sum(axis=0))
+        C_lin = xi2 * c[:, None] * (El.T @ (wG[:, None] * B))              # (N, N): [i, m]
+        V_const = xi2 * float(np.sum(wq * G * G * E0))
+        V_lin = xi2 * ((wq * G * G) @ B)                                   # (N,)
+        self._int_mom = {"C_yI_const": C_const, "C_yI_lin": C_lin, "V_I_const": V_const, "V_I_lin": V_lin,
+                         "nodes": tau, "weights": wq, "E0": E0, "B": B}
+        return self._int_mom
+
+    def check_quadrature(self, y0):
+        """Largest relative error of the quadrature grid on Cov(y, y), against the closed form."""
+        m = self.integrated_moments()
+        tau, wq, E0, B = m["nodes"], m["weights"], m["E0"], m["B"]
+        EV = E0 + B @ y0
+        El = np.exp(-np.outer(tau, self.lam))
+        Cq = self.xi ** 2 * np.outer(self.c, self.c) * ((El * (wq * EV)[:, None]).T @ El)
+        Cx = self._cov_const + self._cov_lin @ y0
+        return float(np.max(np.abs(Cq - Cx)) / np.max(np.abs(Cx)))
 
     def y_from_U(self, U):
         return self.T @ U
@@ -718,7 +796,7 @@ COST_PER_STEP = {"etdrk4": 1.36, "exptrap": 1.0}
 
 
 def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
-                  scheme="etdrk4", c_stab=None, check_stability=True):
+                  scheme="etdrk4", c_stab=None, check_stability=True, eta_N=1.0e5):
     """
     log cf(u) for the lifted rough Heston, from the N-factor Riccati system
 
@@ -761,7 +839,7 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
     """
     u = np.atleast_1d(np.asarray(u, dtype=complex))
     v0, kappa, theta, xi, rho, H = p.as_tuple()
-    w, x = lift_nodes(H, N)
+    w, x = lift_nodes(H, N, eta_N=eta_N)
     if steps is None:
         u_abs = float(np.max(np.abs(u)))
         if scheme == "etdrk4":

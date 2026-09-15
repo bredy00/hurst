@@ -326,6 +326,25 @@ DEFAULT_ROUGH_STARTS = (
 )
 
 
+def blas_single_thread():
+    """
+    A context that pins OpenBLAS to one thread, or does nothing without threadpoolctl.
+
+    Measured in Session G (benchmark_riccati.py): every threaded BLAS call on the
+    Riccati step's small (24 x n_u) products pays 80-130 us of thread dispatch,
+    single-threaded matmul is the fastest contraction at every n_u from 16 to
+    8192, and a 10-expiry rough objective evaluation drops from 0.717 s to
+    0.641 s (median of 7). Pinned once around a whole calibration, so the
+    context's own cost is paid once, not per solve.
+    """
+    try:
+        from threadpoolctl import threadpool_limits
+        return threadpool_limits(limits=1, user_api="blas")
+    except ImportError:                                  # pragma: no cover
+        import contextlib
+        return contextlib.nullcontext()
+
+
 KERNEL_TOL = 0.01           # max relative kernel error on [1 day, 2 y], strictly below (review target)
 REFINE_N = 32               # N = 24 breaches KERNEL_TOL below H ~ 0.08; N = 32 holds on the whole box
 
@@ -382,9 +401,10 @@ def calibrate_rough_heston(surface, starts=DEFAULT_ROUGH_STARTS, tail_tol=1e-9,
     """
     lm_kw.setdefault("step", 1e-3)
     pricer = RoughPricerFactory(tail_tol, N)
-    res = calibrate(surface, pricer.cf_factory, ROUGH_TRANSFORM, starts,
-                    tol=tail_tol, prior=prior, prior_weight=prior_weight,
-                    pricer=pricer.pricer, **lm_kw)
+    with blas_single_thread():
+        res = calibrate(surface, pricer.cf_factory, ROUGH_TRANSFORM, starts,
+                        tol=tail_tol, prior=prior, prior_weight=prior_weight,
+                        pricer=pricer.pricer, **lm_kw)
     p = res["params"]
     res["kernel_error"] = rh.kernel_error(p.H, N)[0]
     res["pricer_stats"] = dict(pricer.pricer.stats)

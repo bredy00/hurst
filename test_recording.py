@@ -264,6 +264,30 @@ def test_history():
     check("history file round-trips", back["bars5m"] == data["bars5m"])
 
 
+def test_pipeline_synthetic():
+    print("\nThe real-data pipeline, end to end on a recording with a known answer")
+    import run_real_data as rrd
+    with tempfile.TemporaryDirectory() as d:
+        t0 = time.perf_counter()
+        truth, snap, history = rrd.synthetic_inputs(d)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            report, out_dir = rrd.run(snap, history, "hybrid", out_dir=pathlib.Path(d) / "report", synthetic=True,
+                                      quick=True)
+        wrote = all((out_dir / f).exists() for f in ("report.json", "report.md", "figure.png"))
+    c = report["chain"]["checks"]
+    check("recorded chain passes the unit and convention checks (vega ratio, IV under our tau)",
+          c["vega_units_ok"] and abs(c["iv_mid_minus_ibkr_median_vp"]) < 0.05 and not c["weak_parity"],
+          f"vega ratio {c['vega_ratio_median']:.3f}, IV gap {c['iv_mid_minus_ibkr_median_vp']:+.3f} vp")
+    sf = report["chain"]["surface"]
+    check("the surface keeps the quotes and builds short-end anchors", sf["quotes"] > 50 and sf["anchors"] >= 2,
+          f"{sf['quotes']} quotes, {sf['anchors']} anchors")
+    fp = report["H"]["filter_profile"]
+    check("the history filter recovers the planted H = 0.10 within 3 SE",
+          abs(fp["H"] - truth.H) < 3 * fp["se"], f"H {fp['H']:.3f} +/- {fp['se']:.3f}  ({time.perf_counter()-t0:.0f}s)")
+    check("report.json, report.md and figure.png are written", wrote)
+
+
 if __name__ == "__main__":
     print("=" * 74)
     print("Session G -- recording IBKR chains and history (offline, fake exchange)")
@@ -276,6 +300,7 @@ if __name__ == "__main__":
     test_delayed_session()
     test_check_mode()
     test_history()
+    test_pipeline_synthetic()
     print("\n" + "=" * 74)
     print(f"{len(PASS)} passed, {len(FAIL)} failed   ({time.perf_counter()-t0:.0f}s)")
     for f in FAIL:

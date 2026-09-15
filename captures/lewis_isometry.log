@@ -1,0 +1,12 @@
+A  isometry, H=0.12 N=24: max |rel| 21.56% on [1 d, 2 y], 44.19% on [1 h, 2 y], -76.8% at 5 minutes; MC of the lift's own isometry z = -72.54 (discrete vs continuous +34.78%)  (8s)
+B  variogram exponent, N=24: mean 0.339 over [1 h, 1 month] (2H = 0.24); 0.96 at one minute  (8s)
+C    1 d: E[X] cf -0.00005502 vs -1/2 E[int V] -0.00005502 (rel 2.5e-08); |phi(-i)-1| 0.0e+00; Var[X] cf 0.000111
+C   30 d: E[X] cf -0.00169152 vs -1/2 E[int V] -0.00169152 (rel 5.9e-07); |phi(-i)-1| 0.0e+00; Var[X] cf 0.003523; QE MC Var 0.003574, E[X] -0.001576 +/- 0.000134
+C  365 d: E[X] cf -0.02152208 vs -1/2 E[int V] -0.02152208 (rel 3.0e-08); |phi(-i)-1| 0.0e+00; Var[X] cf 0.047880
+D   1 d: checked cut-off 2410 (extended 1x); wing IV error by fixed U: U=25: 3.89e+01 vp, U=50: nan vp, U=100: nan vp, U=200: 8.17e+00 vp, U=400: 3.04e-02 vp, U=800: 3.09e-02 vp, U=1600: 6.42e-05 vp
+D   7 d: checked cut-off 1113 (extended 1x); wing IV error by fixed U: U=25: nan vp, U=50: 6.74e-01 vp, U=100: 6.32e+00 vp, U=200: 1.36e+00 vp, U=400: 1.39e-02 vp, U=800: 4.55e-05 vp, U=1600: 5.42e-05 vp
+D  30 d: checked cut-off 531 (extended 0x); wing IV error by fixed U: U=25: 1.25e+00 vp, U=50: 5.67e+00 vp, U=100: 1.27e+00 vp, U=200: 1.00e-03 vp, U=400: 1.08e-04 vp, U=800: 1.14e-04 vp, U=1600: 1.15e-04 vp
+C:\Projects\volatility-surface-tuning\study_lewis_isometry.py:246: UserWarning: Tight layout not applied. tight_layout cannot make Axes height small enough to accommodate all Axes decorations.
+  fig.tight_layout()
+(74s)
+exit 0

@@ -395,6 +395,67 @@ def test_rough_positivity_and_qml():
           f"quasi-likelihood is unreliable; that needs a non-Gaussian filter (open flag)")
 
 
+# --- Session G: roughness itself, learned in the filter ------------------------
+def test_learn_h():
+    print("\nG -- learning H in the filter: profile likelihood, filter bank, recursive MLE, realised variance")
+    import models.rough_heston as rh
+    import sources.synthetic as syn
+    import sources.history as hist
+    pz = dict(kappa=3.0, theta=0.06, xi=0.15, R=0.005 ** 2)
+    grid = (0.05, 0.08, 0.12, 0.17, 0.25, 0.35, 0.49)
+    m = kf.LiftedRoughModel(DT, H=0.12, v0=pz["theta"])
+    V, _ = kf.simulate_rough(m, pz, 1500, seed=1)
+    y = V + np.random.default_rng(901).normal(0.0, math.sqrt(pz["R"]), 1500)
+
+    t0 = time.perf_counter()
+    prof = kf.profile_h(y, grid, pz, DT, pz["theta"], names=("xi",))
+    bank = kf.filter_bank(prof["runs"], grid)
+    dll = prof["loglik"] - prof["loglik"].max()
+    print(f"      xi re-fitted at every H: dll {np.round(dll, 1)}; H_hat {prof['H_hat']:.3f} (se {prof['se_quadratic']:.3f}); "
+          f"bank {bank['mean'][-1]:.3f} +/- {bank['sd'][-1]:.3f}  ({time.perf_counter()-t0:.0f}s)")
+    check("profile likelihood (xi re-fitted at each H) recovers H = 0.12 within 3 SE",
+          abs(prof["H_hat"] - 0.12) < 3 * max(prof["se_quadratic"], 0.005), f"{prof['H_hat']:.3f}")
+    check("...and rejects H = 0.49 (Heston-like) outright, even with xi free", dll[-1] < -20.0,
+          f"log-likelihood {dll[-1]:+.0f}; xi had to go to {prof['params'][-1]['xi']:.2f}")
+    check("the filter bank's posterior puts < 1% on H >= 0.35 and centres within 0.03 of the truth",
+          float(bank["final"][-2:].sum()) < 0.01 and abs(bank["mean"][-1] - 0.12) < 0.03,
+          f"posterior {np.round(bank['final'], 3)}")
+
+    t0 = time.perf_counter()
+    prof0 = kf.profile_h(y[:1200], grid, pz, DT, pz["theta"])
+    mh = kf.LiftedRoughModelH(DT, v0=pz["theta"], H0=0.30)
+    rec = kf.recursive_mle(mh, dict(pz, H=0.30), y[:1200], learn=("H",), fd=1e-5)
+    path = rec["params"][:, 0]
+    check("recursive MLE learns H online: from 0.30 to within 0.02 of the offline MLE",
+          abs(path[-1] - prof0["H_hat"]) < 0.02,
+          f"H after 100 / 600 / 1200 days: {path[99]:.3f} / {path[599]:.3f} / {path[-1]:.3f}; "
+          f"offline {prof0['H_hat']:.3f}  ({time.perf_counter()-t0:.0f}s)")
+
+    # realised variance is an integral over the day: the observation model matters
+    truth = rh.RoughHestonParams(0.025, 2.0, 0.035, 0.4, -0.7, 0.10)
+    t0 = time.perf_counter()
+    w_, x_ = rh.lift_nodes(0.10, 24)
+    st = rh.LiftedAffineStep(w_, x_, truth.v0, truth.kappa, truth.theta, truth.xi, DT)
+    check("integrated-variance moments: the quadrature grid reproduces the closed-form covariance",
+          st.check_quadrature(st.y_star) < 1e-12, f"{st.check_quadrature(st.y_star):.1e}")
+    h = syn.synthetic_history(truth, n_days=500, seed=3)
+    integ = np.array(h["true_daily_integrated_variance"])
+    rv = hist.realised_variance(h["bars5m"])["rv"]
+    g2 = (0.03, 0.05, 0.08, 0.12, 0.17, 0.25, 0.35, 0.49)
+    p0 = dict(kappa=2.0, theta=float(np.mean(integ)), xi=0.4, R=1e-10)
+    spot = kf.profile_h(integ, g2, p0, DT, p0["theta"], names=("xi",))
+    rvm = kf.profile_h(integ, g2, p0, DT, p0["theta"], names=("xi",), model_cls=kf.LiftedRoughRVModel)
+    p1 = dict(p0, theta=float(np.mean(rv)))
+    rvr = kf.profile_h(rv, g2, p1, DT, p1["theta"], names=("xi",), model_cls=kf.LiftedRoughRVModel)
+    print(f"      500 days, true H = 0.10: spot-variance filter on integrated variance {spot['H_hat']:.3f}; "
+          f"integrated-variance filter {rvm['H_hat']:.3f} (se {rvm['se_quadratic']:.3f}); on realised variance "
+          f"{rvr['H_hat']:.3f} (se {rvr['se_quadratic']:.3f})  ({time.perf_counter()-t0:.0f}s)")
+    check("treating daily integrated variance as spot variance biases H up by more than 0.1",
+          spot["H_hat"] - 0.10 > 0.10, f"{spot['H_hat']:.3f}")
+    check("the integrated-variance filter recovers H within 3 SE, from integrated variance and from 5-minute RV",
+          abs(rvm["H_hat"] - 0.10) < 3 * rvm["se_quadratic"] and abs(rvr["H_hat"] - 0.10) < 3 * rvr["se_quadratic"])
+
+
 if __name__ == "__main__":
     print("=" * 74)
     print("Session F / F2 -- Kalman, adaptive and dual Kalman on OU, Heston and rough Heston")
@@ -406,6 +467,7 @@ if __name__ == "__main__":
     test_cir_host()
     test_rough_host()
     test_rough_positivity_and_qml()
+    test_learn_h()
     print("\n" + "=" * 74)
     print(f"{len(PASS)} passed, {len(FAIL)} failed   ({time.perf_counter()-t0:.0f}s)")
     for f in FAIL:

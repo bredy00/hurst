@@ -214,6 +214,261 @@ class LiftedRoughModel:
         return self.v0 + U @ self.w
 
 
+class LiftedRoughModelH(LiftedRoughModel):
+    """
+    The lifted rough filter with the roughness H as a PARAMETER (Session G).
+
+    params: kappa, theta, xi, R, H. The factor count N is fixed, and for any H the
+    lift uses the same partition of the rate axis (lift_nodes: the same cells,
+    H-dependent cell masses and means), so the nodes x_i(H) and weights w_i(H)
+    move smoothly with H and the state keeps its meaning -- "the driving noise
+    averaged at rate x_i" -- while H changes. That is what makes H filterable: a
+    parameter filter can take a step in H without re-defining the state.
+
+    The observation vector is w(H), so observation() depends on the parameters
+    (observation_varies), which recursive_mle's sensitivity equations account for.
+    H is bounded to (0.02, 0.49): the lift collapses to one node at H = 1/2.
+    """
+
+    param_names = ("kappa", "theta", "xi", "R", "H")
+    positive = ("kappa", "theta", "xi", "R")
+    bounded = {"H": (0.02, 0.49)}
+    observation_varies = True
+
+    def __init__(self, dt, v0=0.04, N=None, H0=0.12, discretisation="exact"):
+        super().__init__(dt, H=H0, v0=v0, N=N, discretisation=discretisation)
+        self._node_cache = {}
+
+    def nodes(self, H):
+        import models.rough_heston as rh
+        lo, hi = self.bounded["H"]
+        H = min(max(float(H), lo), hi)
+        got = self._node_cache.get(H)
+        if got is None:
+            got = rh.lift_nodes(H, self.N)
+            if len(self._node_cache) > 64:
+                self._node_cache.clear()
+            self._node_cache[H] = got
+        return got
+
+    def _use(self, p):
+        self.w, self.x = self.nodes(p["H"])
+        self.H = float(p["H"])
+        self.E = np.exp(-self.x * self.dt)
+        self.g = __import__("models.rough_heston", fromlist=["_phi1"])._phi1(-self.x * self.dt)
+
+    def stepper(self, p, h=None):
+        import models.rough_heston as rh
+        h = self.dt if h is None else float(h)
+        key = (p["kappa"], p["theta"], p["xi"], float(p["H"]), h)
+        st = self._steps.pop(key, None)
+        if st is None:
+            w, x = self.nodes(p["H"])
+            st = rh.LiftedAffineStep(w, x, self.v0, p["kappa"], p["theta"], p["xi"], h)
+            if len(self._steps) >= 8:
+                self._steps.pop(next(iter(self._steps)))
+        self._steps[key] = st
+        return st
+
+    def transition(self, p):
+        if self.discretisation == "exact":
+            return self.stepper(p).transition_U()
+        w, x = self.nodes(p["H"])
+        E, g = np.exp(-x * self.dt), __import__("models.rough_heston", fromlist=["_phi1"])._phi1(-x * self.dt)
+        A = np.diag(E) - p["kappa"] * self.dt * np.outer(g, w)
+        return A, p["kappa"] * self.dt * (p["theta"] - self.v0) * g
+
+    def process_cov(self, p, U):
+        if self.discretisation == "exact":
+            return self.stepper(p).cov_U(U)
+        w, x = self.nodes(p["H"])
+        g = __import__("models.rough_heston", fromlist=["_phi1"])._phi1(-x * self.dt)
+        V = max(self.v0 + float(w @ U), 0.0)
+        return (p["xi"] ** 2) * V * self.dt * np.outer(g, g)
+
+    def observation(self, p):
+        self._use(p)
+        return self.w.copy(), self.v0
+
+    def initial(self, p):
+        self._use(p)
+        return super().initial(p)
+
+
+def profile_h(y, H_grid, p, dt, v0, N=None, names=None, model_cls=None):
+    """
+    model_cls: LiftedRoughModel (spot variance observed) or LiftedRoughRVModel
+    (daily realised variance observed). The choice is not cosmetic: on 500 days of
+    synthetic rough variance with H = 0.10, the spot model fed realised variance
+    returned H = 0.39 (Session G).
+
+    Log-likelihood of the lifted filter at each H on a grid, the other parameters
+    either held at `p` or re-fitted (`names`). Returns a dict with the curve, the
+    maximiser (quadratic through the best three points), a Wald-type SE from that
+    quadratic's curvature, and the 95% profile interval (log-likelihood within
+    1.92 of the maximum, linearly interpolated). Each grid point's full filter
+    output is kept for the bank of filters.
+    """
+    H_grid = np.asarray(H_grid, float)
+    ll, runs, fitted = [], [], []
+    warm = dict(p)
+    for H in H_grid:
+        m = (model_cls or LiftedRoughModel)(dt, H=float(H), v0=v0, N=N)
+        q = dict(warm)
+        if names and len(names) == 1:
+            # one nuisance parameter: a bounded Brent search in log space, ~20
+            # filter runs, instead of Nelder-Mead plus a Hessian nobody reads
+            from scipy.optimize import minimize_scalar
+            k = names[0]
+            base = math.log(q[k])
+
+            def nll(z):
+                try:
+                    v = -kalman_filter(m, dict(q, **{k: math.exp(z)}), y)["loglik"]
+                    return v if np.isfinite(v) else 1e300
+                except (ValueError, OverflowError, np.linalg.LinAlgError):
+                    return 1e300
+            res = minimize_scalar(nll, bounds=(base - math.log(20.0), base + math.log(20.0)), method="bounded",
+                                  options={"xatol": 1e-3})
+            q[k] = math.exp(res.x)
+        elif names:
+            q = fit_mle(m, y, q, names=names)["params"]
+        warm = dict(q)                 # neighbouring H: start from here
+        r = kalman_filter(m, q, y)
+        ll.append(r["loglik"])
+        runs.append(r)
+        fitted.append(q)
+    ll = np.array(ll)
+    j = int(np.argmax(ll))
+    H_hat, se = float(H_grid[j]), float("nan")
+    if 0 < j < len(H_grid) - 1:
+        a, b, c = np.polyfit(H_grid[j - 1:j + 2], ll[j - 1:j + 2], 2)
+        if a < 0:
+            H_hat = float(-b / (2 * a))
+            se = float(1.0 / math.sqrt(-2 * a))
+    cut = ll.max() - 1.92
+    inside = np.where(ll >= cut)[0]
+    lo_i, hi_i = inside.min(), inside.max()
+
+    def cross(i0, i1):
+        if i1 < 0 or i1 >= len(H_grid):
+            return float(H_grid[i0])
+        return float(np.interp(cut, sorted([ll[i0], ll[i1]]),
+                               [H_grid[i1], H_grid[i0]] if ll[i1] < ll[i0] else [H_grid[i0], H_grid[i1]]))
+    return {"H": H_grid, "loglik": ll, "H_hat": H_hat, "se_quadratic": se,
+            "ci95": (cross(lo_i, lo_i - 1), cross(hi_i, hi_i + 1)), "runs": runs, "params": fitted}
+
+
+def filter_bank(runs, labels, forget=0.0, prior=None):
+    """
+    Bayesian model averaging over a grid of models run side by side: each filter's
+    one-step predictive density N(nu_t; 0, S_t) updates the posterior weight of its
+    grid point,
+
+        w_k(t) propto [(1 - forget) w_k(t-1) + forget / K] N(nu_k,t; 0, S_k,t)
+
+    With forget = 0 the final weights are the normalised likelihoods (the profile
+    likelihood as a posterior). forget > 0 lets the posterior move if the
+    roughness itself changes -- H tracked online, not only estimated.
+    Returns the weight path, the posterior mean and SD of the label over time.
+    """
+    labels = np.asarray(labels, float)
+    K = len(runs)
+    n = len(runs[0]["innov"])
+    logd = np.stack([-0.5 * (np.log(2 * math.pi * r["S"]) + r["innov"] ** 2 / r["S"]) for r in runs], axis=1)
+    w = np.full(K, 1.0 / K) if prior is None else np.asarray(prior, float) / np.sum(prior)
+    W = np.empty((n, K))
+    for t in range(n):
+        lw = np.log(np.maximum((1.0 - forget) * w + forget / K, 1e-300)) + logd[t]
+        lw -= lw.max()
+        w = np.exp(lw)
+        w /= w.sum()
+        W[t] = w
+    mean = W @ labels
+    sd = np.sqrt(np.maximum(W @ labels ** 2 - mean ** 2, 0.0))
+    return {"weights": W, "mean": mean, "sd": sd, "final": W[-1]}
+
+
+class LiftedRoughRVModel(LiftedRoughModel):
+    """
+    The lifted rough filter for DAILY REALISED VARIANCE (Session G).
+
+    Realised variance is not a noisy reading of spot variance: it measures the
+    integral of V over the day, and integration smooths a rough path. Treating it
+    as spot variance biased the filter's H from 0.10 to 0.25 on noise-free
+    integrated variance and to 0.39 on realised variance from 5-minute bars.
+
+    State z = (U, I): the lifted factors at the close and the variance integrated
+    over the day just ended. Given U_{t-1}, the pair (U_t, I_t) has an exact affine
+    conditional mean and covariance (LiftedAffineStep.integrated_moments), so
+
+        U_t = A U_{t-1} + b + w_t,   I_t = e + f'U_{t-1} + eta_t,
+        Cov(w, eta) and Var(eta) evaluated at U_{t-1} like Q,
+        y_t = (1 / dt) I_t + noise.
+
+    The observation noise is R plus realised variance's own sampling variance,
+    2 / M * E[y_t]^2 with M intraday returns (Barndorff-Nielsen & Shephard 2002,
+    for a diffusion), evaluated at the prior mean.
+    """
+
+    def __init__(self, dt, H=0.12, v0=0.04, N=None, bars_per_day=78):
+        super().__init__(dt, H=H, v0=v0, N=N, discretisation="exact")
+        self.dim = len(self.w) + 1
+        self.bars_per_day = int(bars_per_day)
+
+    def transition(self, p):
+        st = self.stepper(p)
+        A_U, b_U = st.transition_U()
+        n = len(self.w)
+        A = np.zeros((n + 1, n + 1))
+        A[:n, :n] = A_U
+        A[n, :n] = st.EI_lin @ st.T
+        b = np.concatenate([b_U, [st.EI_const]])
+        return A, b
+
+    def process_cov(self, p, z):
+        st = self.stepper(p)
+        n = len(self.w)
+        U = np.asarray(z, float)[:n]
+        y0 = st.T @ U
+        mom = st.integrated_moments()
+        Q = np.empty((n + 1, n + 1))
+        U_cov = st._covU_const + st._covU_lin @ U
+        Q[:n, :n] = 0.5 * (U_cov + U_cov.T)
+        C = st.Tinv @ (mom["C_yI_const"] + mom["C_yI_lin"] @ y0)
+        Q[:n, n] = Q[n, :n] = C
+        Q[n, n] = mom["V_I_const"] + float(mom["V_I_lin"] @ y0)
+        ev, vec = np.linalg.eigh(Q)
+        return (vec * np.maximum(ev, 0.0)) @ vec.T
+
+    def observation(self, p):
+        H = np.zeros(len(self.w) + 1)
+        H[-1] = 1.0 / self.dt
+        return H, 0.0
+
+    def observation_var(self, p, z):
+        m = max(float(z[-1]) / self.dt, 0.0)
+        return 2.0 / self.bars_per_day * m * m
+
+    def initial(self, p):
+        n = len(self.w)
+        st = self.stepper(p)
+        A_U, b_U = st.transition_U()
+        U = np.linalg.solve(np.eye(n) - A_U, b_U)
+        P_U = st.stationary_cov_U(U)
+        z = np.concatenate([U, [st.EI_const + float(st.EI_lin @ (st.T @ U))]])
+        A, _ = self.transition(p)
+        Q = self.process_cov(p, z)
+        P = np.zeros((n + 1, n + 1))
+        P[:n, :n] = P_U
+        P = A @ P @ A.T + Q
+        P[:n, :n] = P_U
+        return z, P
+
+    def measure(self, z):
+        return z[..., -1] / self.dt
+
+
 # ----------------------------------------------------------------- simulation
 def simulate_ou(kappa, theta, sigma, dt, n, x0=None, seed=0, jumps=None):
     """Exact OU transitions. `jumps` maps step index -> additive state jump."""
@@ -420,6 +675,7 @@ def kalman_filter(model, p, y, policy=None, x0=None, P0=None):
     A, b = model.transition(p)
     H, c = model.observation(p)
     R = p["R"]
+    obs_var = getattr(model, "observation_var", None)
     x, P = model.initial(p)
     if x0 is not None:
         x = np.asarray(x0, dtype=float).copy()
@@ -440,6 +696,7 @@ def kalman_filter(model, p, y, policy=None, x0=None, P0=None):
             P = A @ P @ A.T + Q
         out_prior[k] = x
         nu = y[k] - (float(H @ x) + c)
+        R = p["R"] + (obs_var(p, x) if obs_var is not None else 0.0)
         S = float(H @ P @ H) + R
         # the shock direction costs a process_cov; the strict policy never reads it
         u_dir = None if isinstance(policy, Strict) else _shock_direction(model, p, x, H)
@@ -555,13 +812,13 @@ def fit_mle(model, y, start, names=None, fixed=None):
     fixed = dict(fixed or {})
 
     def to_z(p):
-        return np.array([math.log(p[k]) if k in model.positive else p[k] for k in names])
+        return np.array([_transform(model, k, p[k]) for k in names])
 
     def from_z(z):
         p = dict(start)
         p.update(fixed)
         for i, k in enumerate(names):
-            p[k] = math.exp(z[i]) if k in model.positive else float(z[i])
+            p[k] = _untransform(model, k, float(z[i]))
         return p
 
     def nll(z):
@@ -583,6 +840,9 @@ def fit_mle(model, y, start, names=None, fixed=None):
             q[k] = float(xv[i])
         if any(q[k] <= 0 for k in names if k in model.positive):
             return np.inf
+        for k, (lo, hi) in getattr(model, "bounded", {}).items():
+            if k in q and not lo <= q[k] <= hi:
+                return np.inf
         return -kalman_filter(model, q, y)["loglik"]
 
     m = len(names)
@@ -605,10 +865,19 @@ def fit_mle(model, y, start, names=None, fixed=None):
 
 # ----------------------------------------------------------------- dual & joint
 def _transform(model, name, value):
+    bounds = getattr(model, "bounded", {}).get(name)
+    if bounds:
+        lo, hi = bounds
+        u = min(max((value - lo) / (hi - lo), 1e-9), 1 - 1e-9)
+        return math.log(u / (1.0 - u))
     return math.log(value) if name in model.positive else value
 
 
 def _untransform(model, name, z):
+    bounds = getattr(model, "bounded", {}).get(name)
+    if bounds:
+        lo, hi = bounds
+        return lo + (hi - lo) / (1.0 + math.exp(-max(min(z, 700.0), -700.0)))
     return math.exp(z) if name in model.positive else z
 
 
@@ -731,6 +1000,9 @@ def recursive_mle(model, p_start, y, learn=("kappa",), p0_param=1.0, fd=1e-6, ma
     dx = np.zeros((m, d))
     dP = np.zeros((m, d, d))
     H, c = model.observation(p)
+    varies = getattr(model, "observation_varies", False)
+    dHo = np.zeros((m, d))
+    dco = np.zeros(m)
     I = np.eye(d)
     est = np.empty(n)
     path = np.empty((n, m))
@@ -744,6 +1016,18 @@ def recursive_mle(model, p_start, y, learn=("kappa",), p0_param=1.0, fd=1e-6, ma
     for k in range(n):
         pw = params_at(w)
         R = pw["R"]
+        if varies:
+            # H(theta) and c(theta): the lifted weights move with H, so the
+            # innovation, its variance and the gain all pick up dH terms
+            for i in range(m):
+                wp, wm = w.copy(), w.copy()
+                wp[i] += fd
+                wm[i] -= fd
+                Hp, cp = model.observation(params_at(wp))
+                Hm, cm_ = model.observation(params_at(wm))
+                dHo[i] = (Hp - Hm) / (2 * fd)
+                dco[i] = (cp - cm_) / (2 * fd)
+            H, c = model.observation(pw)
         if k > 0:
             A, b = model.transition(pw)
             Q = model.process_cov(pw, x)
@@ -768,11 +1052,11 @@ def recursive_mle(model, p_start, y, learn=("kappa",), p0_param=1.0, fd=1e-6, ma
         nu = y[k] - (float(H @ x) + c)
         S = float(H @ P @ H) + R
         K = (P @ H) / S
-        dnu = -(dxp @ H)                                    # (m,)
-        dS = np.array([float(H @ dPp[i] @ H) for i in range(m)])
+        dnu = -(dxp @ H) - (dHo @ x) - dco                  # (m,); the last two vanish unless H moves
+        dS = np.array([float(H @ dPp[i] @ H) + 2.0 * float(dHo[i] @ P @ H) for i in range(m)])
         if "R" in names:
             dS[names.index("R")] += R                       # d R / d log R
-        dK = np.stack([(dPp[i] @ H) / S - (P @ H) * dS[i] / (S * S) for i in range(m)])
+        dK = np.stack([(dPp[i] @ H + P @ dHo[i]) / S - (P @ H) * dS[i] / (S * S) for i in range(m)])
         # score of log N(nu; 0, S) and its Fisher information
         score = -0.5 * (dS / S + 2.0 * nu * dnu / S - nu * nu * dS / (S * S))
         if k >= warmup:
@@ -785,7 +1069,7 @@ def recursive_mle(model, p_start, y, learn=("kappa",), p0_param=1.0, fd=1e-6, ma
         P_new = IKH @ P @ IKH.T + R * np.outer(K, K)
         for i in range(m):
             dx[i] = dxp[i] + dK[i] * nu + K * dnu[i]
-            dP[i] = dPp[i] - np.outer(dK[i], H @ P) - np.outer(K, H @ dPp[i])
+            dP[i] = dPp[i] - np.outer(dK[i], H @ P) - np.outer(K, H @ dPp[i]) - np.outer(K, dHo[i] @ P)
             dP[i] = 0.5 * (dP[i] + dP[i].T)
         x, P = x_new, P_new
         est[k] = float(model.measure(x))

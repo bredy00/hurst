@@ -51,7 +51,7 @@ class _Bar:
 
 
 def make_fake(app_class, spot=650.0, rate=0.04, carry=0.012, delayed=False, H=0.1,
-              today=None, bars_fn=None):
+              today=None, bars_fn=None, iv_fn=None):
     import datetime
     base_today = today or datetime.date(2026, 9, 15)
 
@@ -134,7 +134,7 @@ def make_fake(app_class, spot=650.0, rate=0.04, carry=0.012, delayed=False, H=0.
             now = datetime.datetime.now(datetime.timezone.utc)
             tau = vc.tau_years(now, vc.parse_ib_date(exp))
             F, df = self.fake_forward(tau), math.exp(-self.fake_rate * tau)
-            sig = smile_iv(math.log(K / F), tau, H)
+            sig = (iv_fn or smile_iv)(math.log(K / F), tau, H)
             price = float(vc.bs_price(F, K, sig, tau, df, right))
             half = max(0.01, 0.015 * price)
             bid, ask = max(price - half, 0.0), price + half
