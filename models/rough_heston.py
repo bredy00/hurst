@@ -150,6 +150,47 @@ def lift_nodes(H, N=N_DEFAULT, eta_1=0.1, eta_N=1.0e5):
     return w, x
 
 
+_LIFT_NODES = lift_nodes          # the construction itself, whatever using_lift has swapped in
+
+
+class using_lift:
+    """
+    Context manager: every consumer of the lift -- pricer, calibration, Kalman,
+    particle and characteristic-function filters, simulators, jump hosts -- reads
+    lift_nodes through this module at call time, so inside
+
+        with rh.using_lift(40, 1e8):
+            ...
+
+    the whole stack runs on that lift. Used to measure what adopting a lift would do
+    (study_finer_lift.py) and to run the real-data pipeline on either lift
+    (run_real_data.py --lift) while the default is undecided. A request for the
+    one-node lift (N = 1, vanilla Heston) is passed through unchanged.
+    """
+
+    def __init__(self, N, eta_N):
+        self.N, self.eta_N = int(N), float(eta_N)
+        self._saved = None
+
+    def __enter__(self):
+        global lift_nodes
+        exact = _LIFT_NODES
+        N, eta_N = self.N, self.eta_N
+
+        def patched(H, *args, **kwargs):
+            n_req = args[0] if args else kwargs.get("N", N_DEFAULT)
+            if n_req == 1:
+                return exact(H, 1)
+            return exact(H, N, eta_1=kwargs.get("eta_1", 0.1), eta_N=eta_N)
+        self._saved = lift_nodes                     # restores an outer using_lift on exit
+        lift_nodes = patched
+        return self
+
+    def __exit__(self, *exc):
+        global lift_nodes
+        lift_nodes = self._saved
+
+
 def kernel_approx(t, weights, nodes):
     """sum_i w_i e^{-x_i t}, vectorised over t."""
     t = np.atleast_1d(np.asarray(t, dtype=float))
@@ -520,6 +561,25 @@ class LiftedAffineStep:
             beta = (1.0 - p) / m[expo]
             out[expo] = np.log(p + (1.0 - p) * beta / (beta - A[expo]))
         return out
+
+    def step_given(self, y, z, u, zp_full):
+        """
+        The variance step with the noise supplied: z, u of shape (n,), zp_full of
+        shape (N, n) of which the first L_perp.shape[1] rows are used. Returns
+        (y_h, V_h, dI). The shapes do not depend on the parameters, so a particle
+        filter can run common random numbers across parameter values (Session H).
+        """
+        mu = self.e[:, None] * y + self.mean_add[:, None]
+        m = self.v0 + self.c @ mu
+        s2 = np.maximum(self.s2_const + self.s2_lin @ y, 0.0)
+        V = self.qe_draw(m, s2, z, u)
+        Vbar = s2 / (self.xi ** 2 * self.cSc)
+        r = self.L_perp.shape[1]
+        y_new = mu + self.reg[:, None] * (V - m)[None, :] + \
+            (self.L_perp @ zp_full[:r]) * (self.xi * np.sqrt(Vbar))[None, :]
+        EI = np.maximum(self.EI_const + self.EI_lin @ y, 0.0)
+        dI = np.maximum(EI + 0.5 * self.h * (V - m), 0.0)
+        return y_new, V, dI
 
     def step_y(self, y, rng, with_log_price=False):
         """

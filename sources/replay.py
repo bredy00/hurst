@@ -50,7 +50,10 @@ def record(app, ctxs, path, symbol=None, meta=None):
     snap = {
         "format": FORMAT,
         "symbol": symbol or getattr(app, "_symbol", None) or "UNKNOWN",
-        "recorded_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        # UTC with its offset (Session H). The bare now() written before was local
+        # wall-clock time with no offset -- on this UTC+3 machine three hours from
+        # the instant the taus were measured at. recorded_utc() handles both.
+        "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "spot": float(app.spot_price),
         "trading_class": getattr(app, "trading_class", None),
         "expiries": {
@@ -115,6 +118,31 @@ def load(path):
         app.id_map[req_id] = (q.expiry, q.strike, q.right)
 
     return app, ctxs
+
+
+def recorded_utc(app, ctxs=None):
+    """
+    The instant a snapshot's taus were measured at, as a naive UTC datetime.
+
+    Every expiry's tau in a cycle is tau_years(t0, expiry) for ONE t0 on the UTC
+    clock, so t0 = expiry close (UTC) - tau is exact and needs no timestamp at all;
+    it is what this returns when the expiries are given (median over expiries, a
+    guard against a hand-edited file). Without them, only a timestamp that carries
+    its offset is trusted: snapshots written before Session H stored local time
+    with no offset, and those raise rather than silently shift every short tau.
+    """
+    if ctxs:
+        import numpy as np
+        import volsurf_core as vc
+        stamps = sorted(vc.us_close_utc(vc.parse_ib_date(e)) - datetime.timedelta(seconds=c.tau * vc.SECONDS_PER_YEAR)
+                        for e, c in ctxs.items() if c.tau is not None and np.isfinite(c.tau) and c.tau > 2e-6)
+        if stamps:
+            return stamps[len(stamps) // 2]
+    raw = getattr(app, "recorded_at", None)
+    t = datetime.datetime.fromisoformat(raw) if raw else None
+    if t is None or t.tzinfo is None:
+        raise ValueError(f"snapshot timestamp {raw!r} has no UTC offset and there are no taus to recover it from")
+    return t.astimezone(datetime.timezone.utc).replace(tzinfo=None)
 
 
 def summary(path):

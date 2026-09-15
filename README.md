@@ -25,6 +25,9 @@ models/hawkes.py                      Hawkes process: exact simulation, closed f
 models/jump_hosts.py                  Hawkes jumps on OU / Heston / rough Heston, exact expectations
 filters/kalman.py                     Kalman on OU / CIR / lifted rough; adaptive, robust, dual, recursive MLE;
                                       exact-moment rough filter, realised-variance filter, H learned
+filters/particle.py                   particle filters on the QE step; fully adapted version at the zero boundary
+filters/fourier.py                    characteristic-function filter (Bates 2006) for the lifted variance
+calibrate/clock.py                    the market's variance clock (omega) and event days from a chain
 calibrate/objective.py                implied-vol loss; model failure is charged, never zeroed
 calibrate/fit.py                      Levenberg-Marquardt, generic over the model; Tikhonov prior;
                                       post-fit kernel and stability checks
@@ -37,6 +40,9 @@ capture_session_g.py                  Session G figure: positivity, stability, w
 study_h_weighting.py                  which weights pin H: SE, corr(H, xi), bias under misspecification
 study_cir_vs_rough.py                 CIR vs lifted rough filter: cost, forecasts, volatility drag, kappa sweep
 study_lewis_isometry.py               Ito isometry of the lift, cf drag identity, Lewis tail, lift vs Adams
+study_zero_boundary.py                Kalman vs cf filter vs particle filter at the zero boundary (+ _fine)
+study_finer_lift.py                   N = 24 / 32 / 40 lifts: prices vs Adams, kernel, cost, the H reported
+study_jump_modes.py                   driver vs direct rough jumps: shapes, sizes, second spike, event study
 benchmark_riccati.py                  einsum vs matmul vs pinned BLAS in the Riccati step, per n_u
 debug_fbm_helper.py                   the Session A fBm fixture bug, reproduced
 debug_fd_methods.py                   which 2nd-derivative stencil holds order on real grids
@@ -51,9 +57,13 @@ test_rough_calibration.py             35 checks   (Session E: calibration, H, sk
 test_hawkes.py                        54 checks   (Session F1: Hawkes on three hosts)
 test_filters.py                       46 checks   (Session F2 + G: Kalman on three hosts, learning H)
 test_recording.py                     37 checks   (Session G: IBKR recording offline, pipeline end to end)
+test_clock.py                         45 checks   (Session H: NYSE calendar, variance time, omega estimator)
+test_nongaussian.py                   19 checks   (Session H: particle and cf filters; slow tier)
 conftest.py / pytest.ini              every suite runs under pytest; `-m "not slow"` is the quick tier
 .github/workflows/ci.yml              quick tier on push; full tier + health trend weekly / on demand
 docs/tutorial-ibkr-recording.md       how to install, log in and record (the part that needs Akin)
+docs/comparison-*.pdf                 Session H decision briefs: finer lift, particle vs cf filter, jump modes
+docs/overview-2026-09-15.pdf          Sessions A-H overview and recommendations
 docs/superpowers/plans/               the six-session rough Heston plan
 captures/                             frames, GIFs, comparisons, snapshot.json
 .venv/                                python 3.12.3
@@ -619,15 +629,48 @@ on the same host, recursive-MLE deviation max < 2 SE over 20 runs, kernel error 
 See `captures/session_g.png`, `captures/cir_vs_rough.png`, `captures/lewis_isometry.png`,
 `captures/riccati_benchmark.png`.
 
+## Session H (2026-09-15) -- the zero boundary, the trading clock, three decisions
+
+### Non-Gaussian filters at the zero boundary
+`filters/particle.py`: a fully adapted auxiliary particle filter on the QE step (each
+particle's predictive likelihood in closed form, atom at zero included, before any draw;
+common random numbers and sorted systematic resampling so the likelihood profiles).
+`filters/fourier.py`: Bates' (2006) characteristic-function filter -- the variance cf
+through the lifted Riccati, Bayes in Fourier space, posterior gamma(V) x Gaussian(U | V).
+On 6 seeds x 1500 days with V at zero on 10-17% of days both gain ~257 nats over the
+exact-moment Kalman filter and cut filtered RMSE 10%; Kalman's kappa misses irregularly
+(+1.1, +1.5 on two seeds); the cf filter's kappa sits 0.6 below the particle filter's on
+every seed (`study_zero_boundary.py`, follow-up on finer-simulated data in
+`study_zero_boundary_fine.py`). Away from zero all three agree.
+
+### The trading clock
+`volsurf_core`: NYSE sessions by rule (Easter, observed holidays, early closes, DST),
+seconds split into session / overnight / weekend, `variance_time` with weight omega off
+session, normalised by the 2025 calendar so omega = 1 is ACT/365 exactly.
+`calibrate/clock.py`: omega from the chain -- ATM total variance read with tau = 1, then
+w_j = a (S_j + omega (O_j + W_j)) + event steps, profiled by GLS with an F interval,
+event days found as steps, snapshots pooled. Planted clocks: exact without noise, 90-97%
+interval coverage with 1-3% noise, an FOMC step found 20/20. The first version (MAD of
+log forward rates) was blind to weekends and is kept as a failing case in `test_clock.py`.
+`replay.recorded_utc`: snapshots stored LOCAL time with no offset; the instant is now
+recovered from the stored taus. In `run_real_data.py`: the clock pooled over the day's
+snapshots, and the skew-slope H again on the measured clock.
+
+### Three comparisons, for decision
+`docs/comparison-finer-lift.pdf` (`study_finer_lift.py`), `docs/comparison-particle-vs-cf.pdf`,
+`docs/comparison-jump-modes.pdf` (`study_jump_modes.py`). `rh.using_lift(N, eta_N)` runs the
+whole stack on another lift; `run_real_data.py --lift 40:1e8` does it for the real run.
+Overview of Sessions A-H: `docs/overview-2026-09-15.pdf`.
+
 ## Still open
 
 - **Real data has not been recorded yet**: IB Gateway needs Akin's login
   (docs/tutorial-ibkr-recording.md). Everything downstream runs on a synthetic
-  recording with a known answer.
-- QML near the zero boundary (V at zero on ~13% of days): a Gaussian quasi-likelihood
-  is unreliable there; needs a non-Gaussian (particle / characteristic-function) filter.
-- The lift's short-lag isometry gap (21.6% at one day) matters for intraday-variance
-  estimation of H; a finer lift (N = 40, eta_N = 1e8) cuts it with a cost.
+  recording with a known answer, and the clock and both lifts are wired in.
+- Decisions pending (Akin): the finer lift as default, particle vs cf filter policy at
+  the zero boundary, the rough jump mode.
+- Realised variance for the history: bipower variation (jumps), microstructure noise,
+  and the RV observation in the adapted particle filter and the cf filter.
 - Hawkes estimation from real event data, and the nearly-unstable Hawkes -> rough
   volatility link as a model rather than a citation.
 - eSSVI (calendar-arbitrage-free by construction; `essvi_calendar_ok` measures

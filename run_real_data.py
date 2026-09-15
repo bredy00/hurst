@@ -14,7 +14,12 @@ Chains, per snapshot:
              weights by scheme (hybrid by default: inverse variance balanced per
              expiry + short-end ATM-skew anchors; see calibrate/weights.py)
   fits       vanilla Heston, then rough Heston with its kernel and stability checks
-  H          (1) from the market's ATM-skew term structure (skew ~ tau^(H - 1/2))
+  clock      the variance clock the short end is priced on (Session H,
+             calibrate/clock.py): omega, the price of a night- or weekend-second
+             relative to a session-second, from ATM total variance, pooled over the
+             day's snapshots, with event days found and kept out of it
+  H          (1) from the market's ATM-skew term structure (skew ~ tau^(H - 1/2)),
+                 on calendar time and again on the measured trading clock
              (2) from the rough Heston calibration
 
 History:
@@ -151,6 +156,36 @@ def calibrate_chain(S, max_seconds=900, rough_starts=None):
     return out
 
 
+def trading_clock(snapshot, max_peers=12):
+    """
+    The variance clock from this snapshot and the other snapshots of the same New
+    York day in its folder (evenly thinned to max_peers): pooled omega with its 95%
+    interval, each snapshot's own fit, and how far the calendar clock is from the data.
+    """
+    import calibrate.clock as ck
+    snapshot = pathlib.Path(snapshot)
+    app, ctxs = replay.load(snapshot)
+    t_main = replay.recorded_utc(app, ctxs)
+    day = vc.new_york_date(t_main)
+    files = sorted(f for f in snapshot.parent.glob("*.json") if f.name != "session.jsonl")
+    if len(files) > max_peers:
+        files = [files[int(round(i))] for i in np.linspace(0, len(files) - 1, max_peers)]
+    if snapshot not in files:
+        files.append(snapshot)
+    snaps = []
+    for f in files:
+        try:
+            a, c = replay.load(f)
+            t = replay.recorded_utc(a, c)
+        except (ValueError, KeyError, json.JSONDecodeError):
+            continue
+        if vc.new_york_date(t) == day:
+            snaps.append((t, ck.atm_total_variance(a, c)))
+    main = ck.estimate_omega([(t_main, ck.atm_total_variance(app, ctxs))])
+    pooled = ck.estimate_omega(snaps) if len(snaps) > 1 else main
+    return {"t0_utc": t_main.isoformat(), "n_snapshots": len(snaps), "pooled": pooled, "this_snapshot": main}, t_main
+
+
 # ------------------------------------------------------------------ history
 def analyse_history(data, dt=1.0 / 252, max_days=750, profile_names=("xi",)):
     import filters.kalman as kf
@@ -236,7 +271,9 @@ def plot(report, S, fits, path):
     a = ax[1, 1]
     names, vals, errs = [], [], []
     hc = report.get("H", {})
-    for key, lab in (("skew_term_structure", "(1) surface skew slope"), ("rough_calibration", "(2) rough Heston fit"),
+    for key, lab in (("skew_term_structure", "(1) surface skew slope"),
+                     ("skew_term_structure_trading_clock", "(1b) skew slope, trading clock"),
+                     ("rough_calibration", "(2) rough Heston fit"),
                      ("filter_profile", "(3) filter profile likelihood"), ("structure_function", "(4) structure function")):
         v = hc.get(key)
         if v and v.get("H") is not None and np.isfinite(v["H"]):
@@ -263,7 +300,9 @@ def run(snapshot=None, history=None, scheme="hybrid", out_dir=None, synthetic=Fa
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = pathlib.Path(out_dir or ROOT / "captures" / "real" / "report" / stamp)
     out_dir.mkdir(parents=True, exist_ok=True)
-    report = {"generated": stamp, "scheme": scheme, "synthetic": synthetic, "H": {}}
+    w_lift, x_lift = rh.lift_nodes(0.12)
+    report = {"generated": stamp, "scheme": scheme, "synthetic": synthetic, "H": {},
+              "lift": {"N": len(w_lift), "fastest_node_per_year": float(x_lift.max())}}
     S = fits = None
     if snapshot:
         app, ctxs = replay.load(snapshot)
@@ -282,6 +321,26 @@ def run(snapshot=None, history=None, scheme="hybrid", out_dir=None, synthetic=Fa
             report["H"]["skew_term_structure"] = {"H": ts["H"], "se": ts.get("H_err")}
         print(f"surface: {len(S)} quotes on {S.n_expiries} expiries, {len(S.anchors)} skew anchors; "
               f"skew slope H = {ts.get('H')}", flush=True)
+        try:
+            clock, t_snap = trading_clock(snapshot)
+        except ValueError as e:                       # no usable instant or short end
+            clock, t_snap = {"error": str(e)}, None
+        report["chain"]["clock"] = clock
+        pc = clock.get("pooled", {})
+        if pc.get("identified"):
+            import calibrate.clock as ck
+            S_v, _ = surface_from_snapshot(app, ck.retime(ctxs, t_snap, pc["omega"]), scheme)
+            ts_v = skew_term_structure(S_v)
+            report["chain"]["skew_trading_clock"] = ts_v
+            if ts_v.get("H") is not None:
+                report["H"]["skew_term_structure_trading_clock"] = {"H": ts_v["H"], "se": ts_v.get("H_err")}
+            print(f"clock: omega {pc['omega']:.3f} (95% {pc['ci95'][0]:.3f}-{pc['ci95'][1]:.3f}) from "
+                  f"{clock['n_snapshots']} snapshot(s), {pc['n_expiries']} short expiries; calendar clock "
+                  f"{pc['calendar_chi2']:.1f} noise variances worse; events "
+                  f"{sorted({e for q in pc['per_snapshot'] for e in q['events']})}; skew slope H on it = {ts_v.get('H')}",
+                  flush=True)
+        else:
+            print(f"clock: not identified ({pc.get('reason') or clock.get('error')})", flush=True)
         if not quick:
             fits = calibrate_chain(S, max_seconds)
             report["chain"]["fits"] = fits
@@ -326,6 +385,14 @@ def markdown(r):
                   f"- IV from mid under our tau minus IBKR IV: median {c['iv_mid_minus_ibkr_median_vp']:+.2f} vol points",
                   f"- surface: {ch['surface']['quotes']} quotes, {ch['surface']['expiries']} expiries, "
                   f"{ch['surface']['anchors']} skew anchors, {ch['surface']['effective_quotes']:.1f} effective quotes"]
+        pc = ch.get("clock", {}).get("pooled", {})
+        if pc.get("identified"):
+            evs = sorted({e for q in pc["per_snapshot"] for e in q["events"]})
+            lines += [f"- variance clock: omega = {pc['omega']:.3f} (95% {pc['ci95'][0]:.3f}-{pc['ci95'][1]:.3f}) from "
+                      f"{ch['clock']['n_snapshots']} snapshot(s), {pc['n_expiries']} short expiries; the calendar clock is "
+                      f"{pc['calendar_chi2']:.1f} noise variances worse; event days priced: {', '.join(evs) or 'none'}"]
+        elif ch.get("clock"):
+            lines += [f"- variance clock: not identified ({pc.get('reason') or ch['clock'].get('error')})"]
         if ch.get("fits"):
             f = ch["fits"]
             lines += [f"- Heston: rmse {f['heston']['rmse_vp']:.3f} vp; rough Heston: rmse {f['rough']['rmse_vp']:.3f} vp, "
@@ -386,7 +453,18 @@ def main(argv=None):
     ap.add_argument("--synthetic", action="store_true")
     ap.add_argument("--quick", action="store_true", help="skip calibration (checks, skew H, filters only)")
     ap.add_argument("--max-seconds", type=float, default=900)
+    ap.add_argument("--lift", default=None, metavar="N:ETA_N",
+                    help="run the whole pipeline on another lift, e.g. 40:1e8 (the finer lift under decision); "
+                         "default is the shipped 24:1e5")
     args = ap.parse_args(argv)
+    if args.lift:
+        n_, eta_ = args.lift.split(":")
+        with rh.using_lift(int(n_), float(eta_)):
+            return _main(args)
+    return _main(args)
+
+
+def _main(args):
     if args.synthetic:
         out = ROOT / "captures" / "real" / "synthetic"
         truth, snap, history = synthetic_inputs(out)

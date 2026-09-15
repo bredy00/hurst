@@ -20,6 +20,7 @@ w           total variance sigma^2 * tau. This is the quantity that must be
 """
 
 import datetime
+import functools
 import math
 
 import numpy as np
@@ -115,6 +116,154 @@ def new_york_date(t):
 
 def parse_ib_date(yyyymmdd):
     return datetime.date(int(yyyymmdd[:4]), int(yyyymmdd[4:6]), int(yyyymmdd[6:8]))
+
+
+# --- trading time (Session H) -------------------------------------------------
+def _easter(year):
+    """Gregorian Easter Sunday (anonymous Gregorian algorithm)."""
+    a = year % 19
+    b, c = divmod(year, 100)
+    d, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    l_ = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l_) // 451
+    month, day = divmod(h + l_ - 7 * m + 114, 31)
+    return datetime.date(year, month, day + 1)
+
+
+@functools.lru_cache(maxsize=64)
+def nyse_holidays(year):
+    """
+    Full-day NYSE closures by rule: New Year, MLK, Presidents, Good Friday, Memorial,
+    Juneteenth, Independence, Labor, Thanksgiving, Christmas. A Saturday holiday is
+    observed on the Friday before, a Sunday one on the Monday after (New Year's
+    Day falling on a Saturday is not moved into the previous year, per NYSE rule).
+    """
+    D = datetime.date
+
+    def nth(month, weekday, n):
+        first = D(year, month, 1)
+        return first + datetime.timedelta(days=(weekday - first.weekday()) % 7 + 7 * (n - 1))
+
+    def last(month, weekday):
+        d = D(year, month + 1, 1) - datetime.timedelta(days=1) if month < 12 else D(year, 12, 31)
+        return d - datetime.timedelta(days=(d.weekday() - weekday) % 7)
+
+    def observed(d, allow_friday=True):
+        if d.weekday() == 5:
+            return d - datetime.timedelta(days=1) if allow_friday else None
+        if d.weekday() == 6:
+            return d + datetime.timedelta(days=1)
+        return d
+
+    days = {observed(D(year, 1, 1), allow_friday=False), nth(1, 0, 3), nth(2, 0, 3),
+            _easter(year) - datetime.timedelta(days=2), last(5, 0), observed(D(year, 6, 19)),
+            observed(D(year, 7, 4)), nth(9, 0, 1), nth(11, 3, 4), observed(D(year, 12, 25))}
+    return frozenset(d for d in days if d is not None)
+
+
+@functools.lru_cache(maxsize=64)
+def nyse_early_closes(year):
+    """
+    13:00 closes: July 3, the day after Thanksgiving, Christmas Eve -- each only when
+    it is a weekday that is not itself a holiday (in 2026 July 3 is the observed
+    Independence Day, in 2027 December 24 the observed Christmas).
+    """
+    D = datetime.date
+    hol = nyse_holidays(year)
+    thanksgiving = D(year, 11, 1) + datetime.timedelta(days=(3 - D(year, 11, 1).weekday()) % 7 + 21)
+    cands = (D(year, 7, 3), thanksgiving + datetime.timedelta(days=1), D(year, 12, 24))
+    return frozenset(d for d in cands if d.weekday() < 5 and d not in hol)
+
+
+def session_utc(day):
+    """(open, close) of the NYSE regular session on `day` as naive UTC datetimes, or None if closed."""
+    if day.weekday() >= 5 or day in nyse_holidays(day.year):
+        return None
+    off = 4 if us_dst(day) else 5
+    open_ = datetime.datetime.combine(day, datetime.time(9, 30)) + datetime.timedelta(hours=off)
+    close_h = 13 if day in nyse_early_closes(day.year) else 16
+    close = datetime.datetime.combine(day, datetime.time(close_h, 0)) + datetime.timedelta(hours=off)
+    return open_, close
+
+
+def time_split(t0, t1):
+    """
+    Seconds in [t0, t1) split into (trading, overnight, weekend-or-holiday).
+
+    trading    inside an NYSE regular session
+    overnight  between the close of one session and the open of the session on
+               the next calendar day
+    weekend    any other gap between sessions (weekends, holidays, long weekends)
+    """
+    a, b = _as_naive_utc(t0), _as_naive_utc(t1)
+    if b <= a:
+        return 0.0, 0.0, 0.0
+    sessions = []
+    day = (a - datetime.timedelta(hours=6)).date() - datetime.timedelta(days=7)
+    while True:
+        sess = session_utc(day)
+        if sess is not None:
+            sessions.append((day, sess[0], sess[1]))
+            if sess[0] > b:
+                break
+        day += datetime.timedelta(days=1)
+
+    def overlap(lo, hi):
+        return max((min(hi, b) - max(lo, a)).total_seconds(), 0.0)
+
+    trading = sum(overlap(o, c) for _, o, c in sessions)
+    overnight = weekend = 0.0
+    for (d1, _, c1), (d2, o2, _) in zip(sessions[:-1], sessions[1:]):
+        g = overlap(c1, o2)
+        if (d2 - d1).days == 1:
+            overnight += g
+        else:
+            weekend += g
+    return trading, overnight, weekend
+
+
+@functools.lru_cache(maxsize=1)
+def reference_year_split():
+    """
+    (trading, overnight, weekend) seconds in calendar 2025, a 365-day year, by the
+    holiday rules above: 251 sessions (three early closes), 1622.5 trading hours,
+    3412.5 overnight hours, 3725 weekend and holiday hours. (The real 2025 had one
+    more closure, the national day of mourning on January 9; one-off closures are not
+    rules and are not modelled.) Normalising by it makes a year of variance time a
+    year of calendar time for every weighting. Session H's first cut assumed 252
+    sessions and 251 overnights, which put 4392 hours overnight and 2730 on weekends:
+    harmless while the two weights are equal, wrong whenever they are not.
+    """
+    return time_split(datetime.datetime(2025, 1, 1), datetime.datetime(2026, 1, 1))
+
+
+def variance_years(split, omega_overnight=1.0, omega_weekend=None, min_tau=1e-6):
+    """Variance time in years for a (trading, overnight, weekend) split in seconds."""
+    om_w = omega_overnight if omega_weekend is None else omega_weekend
+    yt, yo, yw = reference_year_split()
+    year = yt + omega_overnight * yo + om_w * yw
+    tr, on, we = split
+    return max((tr + omega_overnight * on + om_w * we) / year, min_tau)
+
+
+def expiry_utc(expiry):
+    """An expiry as a naive UTC instant: datetimes as given, dates at the 16:00 New York close."""
+    return _as_naive_utc(expiry) if isinstance(expiry, datetime.datetime) else us_close_utc(expiry)
+
+
+def variance_time(t0, expiry, omega_overnight=1.0, omega_weekend=None, min_tau=1e-6):
+    """
+    Time to expiry in years of VARIANCE time: trading seconds count 1, overnight
+    seconds omega_overnight, weekend and holiday seconds omega_weekend (defaults to
+    omega_overnight), normalised so a year holds the same total as a calendar year.
+    With both weights 1 this is tau_years exactly; with small weights the clock
+    stops outside the session, as a market that prices little variance there does.
+    """
+    return variance_years(time_split(t0, expiry_utc(expiry)), omega_overnight, omega_weekend, min_tau)
 
 
 # --- Black-Scholes ----------------------------------------------------------

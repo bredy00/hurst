@@ -9,6 +9,7 @@ suite that goes from 1e-15 to 1e-9 still passes; this shows the drift.
     python healthcheck.py            human-readable table
     python healthcheck.py --md       markdown, for the progress report
     python healthcheck.py --trend    plus mean / std / drift over recorded runs
+    python healthcheck.py --no-history   do not add this run to the trend history
 """
 
 import json
@@ -826,6 +827,84 @@ def h_learn_h():
            note="Heston-like roughness rejected with xi free")
 
 
+# ------------------------------------------------------------- Session H
+def h_zero_boundary():
+    import models.rough_heston as rh
+    import filters.fourier as ff
+    import filters.kalman as kf
+    import filters.particle as pfm
+    G = "Zero boundary (Session H)"
+    w, x = rh.lift_nodes(0.12, 24)
+    st = rh.LiftedAffineStep(w, x, 0.04, 3.0, 0.04, 0.3, 1 / 252)
+    A, b = st.transition_U()
+    U = st.U_from_y(st.y_star[:, None])[:, 0] + 0.002 * np.random.default_rng(0).standard_normal(24)
+    dz = 1e-3
+    z = np.array([-dz, 0.0, dz])
+    a, B = ff.variance_cf_coefficients(z, 1 / 252, w, x, 0.04, 3.0, 0.04, 0.3)
+    L = 1j * z * 0.04 + a + B.T @ U
+    mean_cf, var_cf = ((L[2] - L[0]) / (2 * dz) / 1j).real, -((L[2] - 2 * L[1] + L[0]) / dz ** 2).real
+    mean_ex, var_ex = 0.04 + float(w @ (A @ U + b)), float(w @ st.cov_U(U) @ w)
+    worst = max(abs(mean_cf / mean_ex - 1), abs(var_cf / var_ex - 1))
+    record(G, "variance cf (Riccati) vs exact affine mean and variance, 1 day", worst, 1e-6, worst < 1e-6, unit="rel",
+           note="two derivations: the CF filter's Riccati and the eigen-coordinate moments")
+    T = 400
+    runs = {}
+    for label, p in (("away", dict(kappa=3.0, theta=0.09, xi=0.08, R=0.01 ** 2)),
+                     ("near", dict(kappa=3.0, theta=0.04, xi=0.3, R=0.01 ** 2))):
+        m = kf.LiftedRoughModel(1 / 252, H=0.12, v0=p["theta"])
+        V, _ = kf.simulate_rough(m, p, T, seed=61)
+        y = V + np.random.default_rng(661).normal(0.0, 0.01, T)
+        runs[label] = (float(np.mean(V < 1e-12)), kf.kalman_filter(m, p, y)["loglik"],
+                       ff.FourierFilter(1 / 252, H=0.12, v0=p["theta"]).loglik(p, y),
+                       pfm.AdaptedParticleFilter(1 / 252, H=0.12, v0=p["theta"], n_particles=500, seed=1).loglik(p, y))
+    z0, k, f, pt = runs["away"]
+    gap = max(abs(f - k), abs(pt - k))
+    record(G, f"away from zero, {T} days: both filters' log-likelihood vs Kalman", gap, 3.0, gap < 3.0, unit="nats",
+           note=f"CF {f - k:+.2f}, particle {pt - k:+.2f}: nothing to gain where the Gaussian is right")
+    z0, k, f, pt = runs["near"]
+    record(G, f"near zero (V = 0 on {100 * z0:.0f}% of days): particle log-likelihood gain over Kalman", pt - k, 20.0,
+           pt - k > 20.0, unit="nats", note=f"{T} days; 257 nats per 1500 days over 6 seeds (study_zero_boundary.py)")
+    record(G, "near zero: CF filter vs particle filter log-likelihood", abs(f - pt), 6.0, abs(f - pt) < 6.0, unit="nats",
+           note="they agree on the likelihood; the CF filter's kappa still reads 0.6 low near zero (open flag)")
+
+
+def h_clock():
+    import datetime as _dt
+    import calibrate.clock as ck
+    G = "Trading clock (Session H)"
+    D, DT = _dt.date, _dt.datetime
+    pairs = [(DT(2026, 9, 15, 15, 0), D(2026, 9, 16)), (DT(2026, 9, 18, 19, 0), D(2026, 9, 21)),
+             (DT(2026, 10, 30, 12, 0), D(2027, 3, 19))]
+    worst = max(abs(vc.variance_time(t, e, 1.0) / vc.tau_years(t, e) - 1) for t, e in pairs)
+    record(G, "variance time at omega = 1 vs ACT/365", worst, 1e-12, worst < 1e-12, unit="rel")
+    published = {D(2026, 1, 1), D(2026, 1, 19), D(2026, 2, 16), D(2026, 4, 3), D(2026, 5, 25), D(2026, 6, 19),
+                 D(2026, 7, 3), D(2026, 9, 7), D(2026, 11, 26), D(2026, 12, 25)}
+    miss = len(published ^ set(vc.nyse_holidays(2026)))
+    record(G, "NYSE 2026 holidays by rule vs the published calendar", miss, 0, miss == 0, note="days in one list only")
+    hrs = vc.time_split(DT(2026, 9, 4, 20, 0), DT(2026, 9, 8, 13, 30))[2] / 3600
+    record(G, "Labor Day weekend: Friday close to Tuesday open", hrs, 89.5, abs(hrs - 89.5) < 1e-9, unit="h")
+    t0 = DT(2026, 9, 15, 15, 0)
+    days = [d for d in (D(2026, 9, 15) + _dt.timedelta(i) for i in range(22)) if vc.session_utc(d)]
+    rng = np.random.default_rng(3)
+
+    def chain(om, noise):
+        return {d.strftime("%Y%m%d"): (0.0256 * vc.variance_time(t0, d, om) * (1 + noise * rng.standard_normal()), d)
+                for d in days}
+    err = abs(ck.estimate_omega([(t0, chain(0.2, 0.0))])["omega"] / 0.2 - 1)
+    record(G, "planted omega = 0.2 recovered from a noise-free chain", err, 1e-4, err < 1e-4, unit="rel")
+    cover = sum(r["ci95"][0] <= 0.2 <= r["ci95"][1] for r in (ck.estimate_omega([(t0, chain(0.2, 0.02))]) for _ in range(20)))
+    record(G, "95% interval coverage, 20 chains with 2% noise", cover / 20, 0.85, cover / 20 >= 0.85,
+           note="profile GLS with an F(1, dof) cut")
+    import sources.replay as replay
+    import types
+    tr = DT(2026, 9, 15, 17, 42, 11)
+    ctxs = {e: types.SimpleNamespace(tau=vc.tau_years(tr, vc.parse_ib_date(e))) for e in ("20260916", "20261016")}
+    got = replay.recorded_utc(types.SimpleNamespace(recorded_at="2026-09-15T20:42:11"), ctxs)
+    off = abs((got - tr).total_seconds())
+    record(G, "snapshot instant recovered from the taus (local timestamp ignored)", off, 1e-3, off < 1e-3, unit="s",
+           note="snapshots before Session H stored local time with no offset")
+
+
 # ------------------------------------------------------------------ engineering
 def h_engineering():
     out = subprocess.run(
@@ -906,7 +985,7 @@ CHECKS = [h_normal, h_black_scholes, h_finite_difference, h_char_func,
           h_hurst, h_forward, h_svi, h_arbitrage, h_calibration,
           h_fractional_kernel, h_lift, h_rough_robustness, h_identifiability_rough,
           h_hawkes, h_kalman, h_recording, h_positivity, h_lift_fidelity, h_weighting, h_learn_h,
-          h_engineering, h_replay]
+          h_zero_boundary, h_clock, h_engineering, h_replay]
 
 
 def main():
@@ -958,7 +1037,10 @@ def main():
         json.dumps({"results": RESULTS, "seconds": dt,
                     "python": platform.python_version(),
                     "numpy": np.__version__}, indent=1), encoding="utf-8")
-    append_history(dt)
+    if "--no-history" not in sys.argv:
+        # --no-history: a run on a machine in a known-bad state (Session H: a laptop
+        # throttled to a third of its speed) must not become part of the timing trend
+        append_history(dt)
     if "--trend" in sys.argv:
         print_trend()
     return 0 if n_ok == len(RESULTS) else 1
