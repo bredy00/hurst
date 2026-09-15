@@ -30,3 +30,7 @@ C  N=24, 1e5 (shipped): Riccati step 1394 us (640 u); objective 10x13 3.04 s (ch
 C  N=32, 1e5: Riccati step 1460 us (640 u); objective 10x13 3.62 s (checks ok True, max|phi| 0.999986); exact-step build 20.9 ms; QE 10k paths 23.4 ms; Kalman spot 848 us/day, RV 1092 us/day; particle(500) 13.0 ms/day; Fourier 3.43 ms/day + 0.8 s per parameter set (finite True)
 C  N=40, 1e8: Riccati step 1922 us (640 u); objective 10x13 4.38 s (checks ok True, max|phi| 0.999986); exact-step build 55.3 ms; QE 10k paths 34.5 ms; Kalman spot 1357 us/day, RV 1482 us/day; particle(500) 14.4 ms/day; Fourier 4.56 ms/day + 1.0 s per parameter set (finite True)
 [C done in 100s]
+C  N=24, 1e5 (shipped): Riccati step 261 us (640 u); objective 10x13 0.75 s (checks ok True, max|phi| 0.999986); exact-step build 3.4 ms; QE 10k paths 9.0 ms; Kalman spot 239 us/day, RV 173 us/day; particle(500) 2.5 ms/day; Fourier 0.89 ms/day + 0.3 s per parameter set (finite True)
+C  N=32, 1e5: Riccati step 481 us (640 u); objective 10x13 0.80 s (checks ok True, max|phi| 0.999986); exact-step build 4.3 ms; QE 10k paths 8.8 ms; Kalman spot 193 us/day, RV 238 us/day; particle(500) 4.4 ms/day; Fourier 0.75 ms/day + 0.3 s per parameter set (finite True)
+C  N=40, 1e8: Riccati step 432 us (640 u); objective 10x13 1.02 s (checks ok True, max|phi| 0.999986); exact-step build 17.9 ms; QE 10k paths 14.0 ms; Kalman spot 413 us/day, RV 469 us/day; particle(500) 3.0 ms/day; Fourier 0.99 ms/day + 0.2 s per parameter set (finite True)
+[C done in 28s]

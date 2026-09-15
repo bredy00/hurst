@@ -865,7 +865,8 @@ def h_zero_boundary():
     record(G, f"near zero (V = 0 on {100 * z0:.0f}% of days): particle log-likelihood gain over Kalman", pt - k, 20.0,
            pt - k > 20.0, unit="nats", note=f"{T} days; 257 nats per 1500 days over 6 seeds (study_zero_boundary.py)")
     record(G, "near zero: CF filter vs particle filter log-likelihood", abs(f - pt), 6.0, abs(f - pt) < 6.0, unit="nats",
-           note="they agree on the likelihood; the CF filter's kappa still reads 0.6 low near zero (open flag)")
+           note="they agree on the likelihood; the cf filter's low kappa on 4-substep data was a mismatch with the "
+           "data's law, not the filter (study_zero_boundary_fine.py)")
 
 
 def h_clock():

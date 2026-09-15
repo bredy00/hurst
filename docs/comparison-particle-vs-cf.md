@@ -43,7 +43,7 @@ filter's exponential-branch density when the conditional mean is tiny.
 | filtered-variance RMSE (×10⁻³) | 9.47 | **8.49** | **8.49** |
 | 90% band coverage | | 0.91 (moment band) | 0.86 (particle quantiles) |
 | seconds per likelihood, machine under load | 1.2 | 14 | 25 |
-| per day, measured back to back (throttled CPU; ratios comparable) | 0.65 ms | 2.6 ms + 0.8 s per parameter set | 11.6 ms (500 particles, 4 substeps) |
+| per day, measured back to back later, unthrottled (median of 3) | 0.14 ms | 0.63 ms + 0.17 s per parameter set | 2.5 ms (500 particles, 4 substeps) |
 
 **Kalman's κ misses are irregular here.** On 4 of 6 seeds it sits within 0.1 of the
 particle filter; on the other 2 it is off by +1.1 and +1.5. On the finer-simulated data
@@ -101,7 +101,7 @@ overflow bug: one seed's profile had come out with a zero standard error.
 | likelihood surface | deterministic and smooth: quasi-Newton optimisers, Hessian standard errors | Monte Carlo: smooth enough to profile under common random numbers (second differences under 0.5 nats), not for Hessians |
 | accuracy near zero | likelihood and filtering as good as the particle filter; κ within noise of it on continuous-law data | consistent for the law it simulates: enough substeps for continuous-time data |
 | model it targets | the continuous lift | the QE-discretised lift; more substeps approach the continuous law at proportional cost |
-| cost per likelihood, 1500 days | ~5× Kalman: 2.6 ms a day plus 0.8 s of Riccati per parameter set | ~18× Kalman at 500 particles and 4 substeps; linear in particles × substeps, so ~4× more at 16 |
+| cost per likelihood, 1500 days | ~5× Kalman: 0.63 ms a day plus 0.17 s of Riccati per parameter set | ~18× Kalman at 500 particles and 4 substeps; linear in particles × substeps, so ~4× more at 16 |
 | realised variance | needs the joint cf of (V, ∫V): a known extension, not built | bootstrap version has it; the adapted step extends in closed form (∫V is linear in the last V) |
 | finer lift (N = 40) | Riccati cost linear in N | per-step cost quadratic in N |
 | uncertainty bands | from the moment-matched posterior | particle quantiles |

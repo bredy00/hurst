@@ -58,7 +58,7 @@ test_hawkes.py                        54 checks   (Session F1: Hawkes on three h
 test_filters.py                       46 checks   (Session F2 + G: Kalman on three hosts, learning H)
 test_recording.py                     37 checks   (Session G: IBKR recording offline, pipeline end to end)
 test_clock.py                         45 checks   (Session H: NYSE calendar, variance time, omega estimator)
-test_nongaussian.py                   19 checks   (Session H: particle and cf filters; slow tier)
+test_nongaussian.py                   20 checks   (Session H: particle and cf filters; slow tier)
 conftest.py / pytest.ini              every suite runs under pytest; `-m "not slow"` is the quick tier
 .github/workflows/ci.yml              quick tier on push; full tier + health trend weekly / on demand
 docs/tutorial-ibkr-recording.md       how to install, log in and record (the part that needs Akin)

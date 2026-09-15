@@ -97,29 +97,32 @@ pipeline does not do.
 
 ## 4. Cost
 
-**The absolute times in this section are inflated.** They were measured this afternoon
-on a laptop CPU that was thermally throttled after hours at full load: the Windows
-processor-performance counter read 33%, and the healthcheck's rough objective, 0.60 s
-this morning, took 3.3 s on unchanged code. The lifts were measured back to back under
-the same conditions, so the **ratios** are the comparable numbers.
+Measured back to back on this laptop, as the median of three runs. The CPU was
+thermally throttled to a third of its speed for several hours this afternoon, so every
+entry was re-measured after it recovered. The throttled run gave the same key ratios:
+objective 1.44×, Kalman step 2.1×.
 
 | per operation | shipped | N = 32 | finer | finer ÷ shipped |
 |---|---|---|---|---|
-| Riccati step, 640 u-nodes | 1394 µs | 1460 µs | 1922 µs | **1.38×** |
-| rough objective, 10 expiries × 13 strikes, with the pricer's checks | 3.04 s | 3.62 s | 4.38 s | **1.44×** |
-| calibration wall time, from the truth (H = 0.12 / 0.05) | 450 / 375 s | 491 / 439 s | 431 / 579 s | 1.0–1.5× |
-| Kalman filter per day, spot / realised variance | 654 / 767 µs | 848 / 1092 µs | 1357 / 1482 µs | **2.1× / 1.9×** |
-| particle filter per day, 500 particles | 11.6 ms | 13.0 ms | 14.4 ms | 1.24× |
-| cf filter per day, plus coefficients per parameter set | 2.63 ms + 0.8 s | 3.43 ms + 0.8 s | 4.56 ms + 1.0 s | 1.73× |
-| exact-moment step construction | 10.9 ms | 20.9 ms | 55.3 ms | 5.1× |
-| QE simulation step, 10,000 paths | 19.7 ms | 23.4 ms | 34.5 ms | 1.75× |
+| Riccati step, 640 u-nodes | 258 µs | 360 µs | 450 µs | 1.75× |
+| rough objective, 10 expiries × 13 strikes, with the pricer's checks | 0.68 s | 0.81 s | 0.97 s | **1.41×** |
+| calibration wall time from the truth, H = 0.12 / 0.05 (single runs, machine loaded) | 450 / 375 s | 491 / 439 s | 431 / 579 s | 1.0–1.5× |
+| Kalman filter per day, spot variance | 142 µs | 192 µs | 274 µs | **1.9×** |
+| Kalman filter per day, realised variance | 251 µs | 235 µs | 304 µs | 1.2× |
+| particle filter per day, 500 particles | 2.5 ms | 3.1 ms | 3.1 ms | 1.3× |
+| cf filter per day | 0.63 ms | 0.77 ms | 1.16 ms | 1.8× |
+| cf filter coefficients, per parameter set | 0.17 s | 0.21 s | 0.27 s | 1.6× |
+| exact-moment step construction | 1.9 ms | 4.6 ms | 13.1 ms | 7.1× |
+| QE simulation step, 10,000 paths | 6.1 ms | 7.4 ms | 11.6 ms | 1.9× |
 
-Scaled to this morning's unthrottled objective, the finer lift's objective would take
-about 0.9 s instead of 0.6 s. Every pricer check passed on the finer lift, all ten
-expiries at max|φ| = 0.999986, and all its post-fit stability checks passed. The
-Riccati stability constants were measured on the shipped lift, though. The finer lift
-puts more weight into the first minutes of the kernel, so they should be re-measured on
-it as part of adoption rather than assumed.
+Timings of sub-millisecond operations on a laptop are noisy to ±20%, which is why the
+realised-variance Kalman row is not monotone in N (N = 32 reads below N = 24).
+
+Every pricer check passed on the finer lift, with all ten expiries at max|φ| = 0.999986,
+and all its post-fit stability checks passed. The Riccati stability constants were
+measured on the shipped lift, though. The finer lift puts more weight into the first
+minutes of the kernel, so they should be re-measured on it as part of adoption rather
+than assumed.
 
 ![Finer lift: (a) kernel error by lag, (b) isometry shortfall by horizon, (c) option-price error vs fractional Adams, (d) the H the pipeline reports](../captures/finer_lift.png){width=full}
 
@@ -148,10 +151,10 @@ same model.
 - **For:** it removes a calibrated-H bias of 0.005–0.009 that the fit residuals cannot
   reveal. That bias is a quarter to a half of the H standard error Session E found under
   good weighting (0.020). It cuts one-day price error 4–5×, and it makes the model rough
-  where the short end lives. The cost is about 1.4× on the calibration objective and
-  about 2× on the Kalman step.
-- **Against:** the Kalman realised-variance filter pays about 2× per day and gains
-  nothing at daily sampling. If filter speed ever matters, `using_lift(24, 1e5)` around
+  where the short end lives. The cost is about 1.4× on the calibration objective
+  (0.97 s against 0.68 s) and about 1.9× on the Kalman step.
+- **Against:** the Kalman filters pay 1.2–1.9× per day and gain nothing at daily
+  sampling. If filter speed ever matters, `using_lift(24, 1e5)` around
   the history analysis recovers it. The model difference is invisible there (0.133 vs
   0.135).
 - **Sequence:** run the first real surface on both lifts (`--lift 40:1e8`). Adopt, and

@@ -543,11 +543,11 @@
   {
    "group": "Markovian lift",
    "name": "rough objective evaluation, 10 expiries x 13 strikes",
-   "measured": 0.6047810000018217,
+   "measured": 1.06498739999995,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
-   "note": "best of 3 (all: 0.97, 0.62, 0.60); trend target: rolling mean <= 0.75 s"
+   "note": "best of 3 (all: 1.10, 1.06, 1.07); trend target: rolling mean <= 0.75 s"
   },
   {
    "group": "Rough robustness",
@@ -910,6 +910,96 @@
    "note": "Heston-like roughness rejected with xi free"
   },
   {
+   "group": "Zero boundary (Session H)",
+   "name": "variance cf (Riccati) vs exact affine mean and variance, 1 day",
+   "measured": 1.7828692633337084e-08,
+   "threshold": 1e-06,
+   "ok": true,
+   "unit": "rel",
+   "note": "two derivations: the CF filter's Riccati and the eigen-coordinate moments"
+  },
+  {
+   "group": "Zero boundary (Session H)",
+   "name": "away from zero, 400 days: both filters' log-likelihood vs Kalman",
+   "measured": 1.020928045859364,
+   "threshold": 3.0,
+   "ok": true,
+   "unit": "nats",
+   "note": "CF -0.34, particle -1.02: nothing to gain where the Gaussian is right"
+  },
+  {
+   "group": "Zero boundary (Session H)",
+   "name": "near zero (V = 0 on 14% of days): particle log-likelihood gain over Kalman",
+   "measured": 58.25148908374115,
+   "threshold": 20.0,
+   "ok": true,
+   "unit": "nats",
+   "note": "400 days; 257 nats per 1500 days over 6 seeds (study_zero_boundary.py)"
+  },
+  {
+   "group": "Zero boundary (Session H)",
+   "name": "near zero: CF filter vs particle filter log-likelihood",
+   "measured": 0.3773027556815123,
+   "threshold": 6.0,
+   "ok": true,
+   "unit": "nats",
+   "note": "they agree on the likelihood; the cf filter's low kappa on 4-substep data was a mismatch with the data's law, not the filter (study_zero_boundary_fine.py)"
+  },
+  {
+   "group": "Trading clock (Session H)",
+   "name": "variance time at omega = 1 vs ACT/365",
+   "measured": 0.0,
+   "threshold": 1e-12,
+   "ok": true,
+   "unit": "rel",
+   "note": ""
+  },
+  {
+   "group": "Trading clock (Session H)",
+   "name": "NYSE 2026 holidays by rule vs the published calendar",
+   "measured": 0,
+   "threshold": 0,
+   "ok": true,
+   "unit": "",
+   "note": "days in one list only"
+  },
+  {
+   "group": "Trading clock (Session H)",
+   "name": "Labor Day weekend: Friday close to Tuesday open",
+   "measured": 89.5,
+   "threshold": 89.5,
+   "ok": true,
+   "unit": "h",
+   "note": ""
+  },
+  {
+   "group": "Trading clock (Session H)",
+   "name": "planted omega = 0.2 recovered from a noise-free chain",
+   "measured": 0.0,
+   "threshold": 0.0001,
+   "ok": true,
+   "unit": "rel",
+   "note": ""
+  },
+  {
+   "group": "Trading clock (Session H)",
+   "name": "95% interval coverage, 20 chains with 2% noise",
+   "measured": 0.95,
+   "threshold": 0.85,
+   "ok": true,
+   "unit": "",
+   "note": "profile GLS with an F(1, dof) cut"
+  },
+  {
+   "group": "Trading clock (Session H)",
+   "name": "snapshot instant recovered from the taus (local timestamp ignored)",
+   "measured": 0.0,
+   "threshold": 0.001,
+   "ok": true,
+   "unit": "s",
+   "note": "snapshots before Session H stored local time with no offset"
+  },
+  {
    "group": "Engineering",
    "name": "scipy modules on the live import path",
    "measured": 0,
@@ -921,7 +1011,7 @@
   {
    "group": "Engineering",
    "name": "startup to actionable error, no TWS",
-   "measured": 0.5422728999983519,
+   "measured": 0.6875670000000582,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
@@ -930,7 +1020,7 @@
   {
    "group": "Engineering",
    "name": "calibration objective evaluation",
-   "measured": 8.565019999514334,
+   "measured": 16.445679999992535,
    "threshold": 200.0,
    "ok": true,
    "unit": "ms",
@@ -964,7 +1054,7 @@
    "note": "recorded vs replayed surface points"
   }
  ],
- "seconds": 58.207142100000056,
+ "seconds": 85.64171220000003,
  "python": "3.12.3",
  "numpy": "2.5.2"
 }

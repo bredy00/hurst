@@ -403,6 +403,50 @@
  },
  "C": {
   "N=24, 1e5 (shipped)": {
+   "riccati_step_us_640u": 257.6796875004561,
+   "objective_10x13_s": 0.6834920999999667,
+   "objective_phi_max": 0.9999862843113708,
+   "exact_step_build_ms": 1.8516000000090571,
+   "qe_step_10k_paths_ms": 6.104599999957827,
+   "kalman_spot_per_day_us": 142.04719999997906,
+   "kalman_rv_per_day_us": 250.7252000000335,
+   "particle_500_per_day_ms": 2.4839640000000145,
+   "fourier_coefficients_s": 0.16789110000001983,
+   "fourier_per_day_ms": 0.6271688000001632,
+   "objective_all_ok": true,
+   "fourier_loglik_finite": true
+  },
+  "N=32, 1e5": {
+   "riccati_step_us_640u": 359.8859375006924,
+   "objective_10x13_s": 0.8052329000000782,
+   "objective_phi_max": 0.9999862842568236,
+   "exact_step_build_ms": 4.629799999975148,
+   "qe_step_10k_paths_ms": 7.415199999968536,
+   "kalman_spot_per_day_us": 192.3996000000443,
+   "kalman_rv_per_day_us": 234.90080000010494,
+   "particle_500_per_day_ms": 3.0686931999998706,
+   "fourier_coefficients_s": 0.20934509999995043,
+   "fourier_per_day_ms": 0.7675131999999394,
+   "objective_all_ok": true,
+   "fourier_loglik_finite": true
+  },
+  "N=40, 1e8": {
+   "riccati_step_us_640u": 449.80000000016673,
+   "objective_10x13_s": 0.9650544999999511,
+   "objective_phi_max": 0.9999862839399872,
+   "exact_step_build_ms": 13.081700000043384,
+   "qe_step_10k_paths_ms": 11.641600000075414,
+   "kalman_spot_per_day_us": 273.80279999988494,
+   "kalman_rv_per_day_us": 303.9523999996163,
+   "particle_500_per_day_ms": 3.1491643999997905,
+   "fourier_coefficients_s": 0.27370040000005247,
+   "fourier_per_day_ms": 1.156016400000226,
+   "objective_all_ok": true,
+   "fourier_loglik_finite": true
+  }
+ },
+ "C_throttled_afternoon": {
+  "N=24, 1e5 (shipped)": {
    "riccati_step_us_640u": 1393.5484375906526,
    "objective_10x13_s": 3.0437095999950543,
    "objective_all_ok": true,
@@ -444,5 +488,139 @@
    "fourier_per_day_ms": 4.556635999993887,
    "fourier_loglik_finite": true
   }
- }
+ },
+ "C_runs": [
+  {
+   "N=24, 1e5 (shipped)": {
+    "riccati_step_us_640u": 247.6750000006689,
+    "objective_10x13_s": 0.6499952000000349,
+    "objective_all_ok": true,
+    "objective_phi_max": 0.9999862843113708,
+    "exact_step_build_ms": 3.4607000000050903,
+    "qe_step_10k_paths_ms": 8.204899999952886,
+    "kalman_spot_per_day_us": 204.62199999997213,
+    "kalman_rv_per_day_us": 250.7252000000335,
+    "particle_500_per_day_ms": 2.348986800000148,
+    "fourier_coefficients_s": 0.1506041999999752,
+    "fourier_per_day_ms": 0.5699631999998473,
+    "fourier_loglik_finite": true
+   },
+   "N=32, 1e5": {
+    "riccati_step_us_640u": 286.9796875000219,
+    "objective_10x13_s": 0.792782700000032,
+    "objective_all_ok": true,
+    "objective_phi_max": 0.9999862842568236,
+    "exact_step_build_ms": 4.529899999965892,
+    "qe_step_10k_paths_ms": 7.415199999968536,
+    "kalman_spot_per_day_us": 171.79839999994326,
+    "kalman_rv_per_day_us": 233.14559999994347,
+    "particle_500_per_day_ms": 2.671888000000081,
+    "fourier_coefficients_s": 0.18140349999998762,
+    "fourier_per_day_ms": 0.7675131999999394,
+    "fourier_loglik_finite": true
+   },
+   "N=40, 1e8": {
+    "riccati_step_us_640u": 631.8343749995847,
+    "objective_10x13_s": 0.9147758999999951,
+    "objective_all_ok": true,
+    "objective_phi_max": 0.9999862839399872,
+    "exact_step_build_ms": 12.736599999982445,
+    "qe_step_10k_paths_ms": 10.530999999957658,
+    "kalman_spot_per_day_us": 251.58920000012586,
+    "kalman_rv_per_day_us": 301.6227999999046,
+    "particle_500_per_day_ms": 3.9071879999999055,
+    "fourier_coefficients_s": 0.34118530000000646,
+    "fourier_per_day_ms": 1.1022467999998753,
+    "fourier_loglik_finite": true
+   }
+  },
+  {
+   "N=24, 1e5 (shipped)": {
+    "riccati_step_us_640u": 257.6796875004561,
+    "objective_10x13_s": 0.720889800000009,
+    "objective_all_ok": true,
+    "objective_phi_max": 0.9999862843113708,
+    "exact_step_build_ms": 1.8516000000090571,
+    "qe_step_10k_paths_ms": 6.104599999957827,
+    "kalman_spot_per_day_us": 142.04719999997906,
+    "kalman_rv_per_day_us": 264.75119999986424,
+    "particle_500_per_day_ms": 3.5013672000000042,
+    "fourier_coefficients_s": 0.16789110000001983,
+    "fourier_per_day_ms": 0.6271688000001632,
+    "fourier_loglik_finite": true
+   },
+   "N=32, 1e5": {
+    "riccati_step_us_640u": 359.8859375006924,
+    "objective_10x13_s": 0.8865047000000459,
+    "objective_all_ok": true,
+    "objective_phi_max": 0.9999862842568236,
+    "exact_step_build_ms": 7.179400000040914,
+    "qe_step_10k_paths_ms": 10.2575999999317,
+    "kalman_spot_per_day_us": 312.8340000002936,
+    "kalman_rv_per_day_us": 382.8056000002107,
+    "particle_500_per_day_ms": 3.0686931999998706,
+    "fourier_coefficients_s": 0.20934509999995043,
+    "fourier_per_day_ms": 0.8975827999997819,
+    "fourier_loglik_finite": true
+   },
+   "N=40, 1e8": {
+    "riccati_step_us_640u": 449.80000000016673,
+    "objective_10x13_s": 0.9709740999999212,
+    "objective_all_ok": true,
+    "objective_phi_max": 0.9999862839399872,
+    "exact_step_build_ms": 13.081700000043384,
+    "qe_step_10k_paths_ms": 11.641600000075414,
+    "kalman_spot_per_day_us": 273.80279999988494,
+    "kalman_rv_per_day_us": 303.9523999996163,
+    "particle_500_per_day_ms": 3.048106800000369,
+    "fourier_coefficients_s": 0.27370040000005247,
+    "fourier_per_day_ms": 1.5090896000001521,
+    "fourier_loglik_finite": true
+   }
+  },
+  {
+   "N=24, 1e5 (shipped)": {
+    "riccati_step_us_640u": 415.89687499943295,
+    "objective_10x13_s": 0.6834920999999667,
+    "objective_all_ok": true,
+    "objective_phi_max": 0.9999862843113708,
+    "exact_step_build_ms": 1.5781000000743006,
+    "qe_step_10k_paths_ms": 5.399899999929403,
+    "kalman_spot_per_day_us": 129.9699999999575,
+    "kalman_rv_per_day_us": 154.60200000006807,
+    "particle_500_per_day_ms": 2.4839640000000145,
+    "fourier_coefficients_s": 0.24776420000000599,
+    "fourier_per_day_ms": 0.8837388000001738,
+    "fourier_loglik_finite": true
+   },
+   "N=32, 1e5": {
+    "riccati_step_us_640u": 485.9187499999251,
+    "objective_10x13_s": 0.8052329000000782,
+    "objective_all_ok": true,
+    "objective_phi_max": 0.9999862842568236,
+    "exact_step_build_ms": 4.629799999975148,
+    "qe_step_10k_paths_ms": 7.16449999993074,
+    "kalman_spot_per_day_us": 192.3996000000443,
+    "kalman_rv_per_day_us": 234.90080000010494,
+    "particle_500_per_day_ms": 3.6324984000002587,
+    "fourier_coefficients_s": 0.29243689999998423,
+    "fourier_per_day_ms": 0.7666036000000531,
+    "fourier_loglik_finite": true
+   },
+   "N=40, 1e8": {
+    "riccati_step_us_640u": 396.72968750004145,
+    "objective_10x13_s": 0.9650544999999511,
+    "objective_all_ok": true,
+    "objective_phi_max": 0.9999862839399872,
+    "exact_step_build_ms": 18.119199999887314,
+    "qe_step_10k_paths_ms": 15.063299999951596,
+    "kalman_spot_per_day_us": 424.8779999998078,
+    "kalman_rv_per_day_us": 478.42279999986204,
+    "particle_500_per_day_ms": 3.1491643999997905,
+    "fourier_coefficients_s": 0.2208319000000074,
+    "fourier_per_day_ms": 1.156016400000226,
+    "fourier_loglik_finite": true
+   }
+  }
+ ]
 }

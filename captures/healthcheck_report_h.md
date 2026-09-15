@@ -62,7 +62,7 @@
 
 | check | measured | threshold | verdict |
 |---|---|---|---|
-| plant-and-recover, worst relative error<br><sub>7 iters, 1.8s</sub> | `3.13e-11 rel` | `0.01 rel` | PASS |
+| plant-and-recover, worst relative error<br><sub>7 iters, 0.6s</sub> | `3.13e-11 rel` | `0.01 rel` | PASS |
 | fitted RMSE on clean data | `4.06e-09 vol pts` | `0.001 vol pts` | PASS |
 | Jacobian condition number at the solution<br><sub>high = parameters trade off; see identifiability</sub> | `30.05` | `1.00e+08` | PASS |
 | spread of v0 under 0.5vp noise<br><sub>stable</sub> | `3.775 %` | `10 %` | PASS |
@@ -88,7 +88,7 @@
 | N=1 at x=0 reproduces closed-form Heston (ETDRK4, 200 steps) | `7.09e-10` | `1.00e-09` | PASS |
 | full N-node lift at H = 0.4999 vs Heston<br><sub>shrinks 10x per decade of (1/2 - H)</sub> | `1.64e-05` | `1.00e-04` | PASS |
 | ETDRK4 vs implicit trapezoidal + Richardson (H=0.12)<br><sub>independent time-steppers, 1 d / 30 d / 1 y</sub> | `3.79e-06` | `5.00e-06` | PASS |
-| rough objective evaluation, 10 expiries x 13 strikes<br><sub>best of 3 (all: 3.00, 3.05, 3.06); trend target: rolling mean <= 0.75 s</sub> | `3.002 s` | `3 s` | **FAIL** |
+| rough objective evaluation, 10 expiries x 13 strikes<br><sub>best of 3 (all: 1.10, 1.06, 1.07); trend target: rolling mean <= 0.75 s</sub> | `1.065 s` | `3 s` | PASS |
 
 **Rough robustness**
 
@@ -182,7 +182,7 @@
 | variance cf (Riccati) vs exact affine mean and variance, 1 day<br><sub>two derivations: the CF filter's Riccati and the eigen-coordinate moments</sub> | `1.78e-08 rel` | `1.00e-06 rel` | PASS |
 | away from zero, 400 days: both filters' log-likelihood vs Kalman<br><sub>CF -0.34, particle -1.02: nothing to gain where the Gaussian is right</sub> | `1.021 nats` | `3 nats` | PASS |
 | near zero (V = 0 on 14% of days): particle log-likelihood gain over Kalman<br><sub>400 days; 257 nats per 1500 days over 6 seeds (study_zero_boundary.py)</sub> | `58.25 nats` | `20 nats` | PASS |
-| near zero: CF filter vs particle filter log-likelihood<br><sub>they agree on the likelihood; the CF filter's kappa still reads 0.6 low near zero (open flag)</sub> | `0.3773 nats` | `6 nats` | PASS |
+| near zero: CF filter vs particle filter log-likelihood<br><sub>they agree on the likelihood; the cf filter's low kappa on 4-substep data was a mismatch with the data's law, not the filter (study_zero_boundary_fine.py)</sub> | `0.3773 nats` | `6 nats` | PASS |
 
 **Trading clock (Session H)**
 
@@ -200,10 +200,134 @@
 | check | measured | threshold | verdict |
 |---|---|---|---|
 | scipy modules on the live import path<br><sub>scipy.stats alone costs 5.8 s</sub> | `0` | `0` | PASS |
-| startup to actionable error, no TWS<br><sub>was 9.6 s before lazy imports</sub> | `1.521 s` | `3 s` | PASS |
-| calibration objective evaluation<br><sub>39 quotes; 470 ms before vectorising</sub> | `43.6 ms` | `200 ms` | PASS |
+| startup to actionable error, no TWS<br><sub>was 9.6 s before lazy imports</sub> | `0.6876 s` | `3 s` | PASS |
+| calibration objective evaluation<br><sub>39 quotes; 470 ms before vectorising</sub> | `16.45 ms` | `200 ms` | PASS |
 | Gauss-Legendre rules constructed<br><sub>2 reuses; leggauss is O(n^2)</sub> | `1` | `1` | PASS |
 | quadrature tolerance 1e-12 vs 1e-14<br><sub>calibration runs at 1e-12, ~2x faster</sub> | `0` | `1.00e-12` | PASS |
 | replay round-trip fidelity<br><sub>recorded vs replayed surface points</sub> | `0` | `1.00e-12` | PASS |
 
-116 of 117 checks pass (251s).
+117 of 117 checks pass (86s).
+
+Trend over 9 recorded run(s)
+--------------------------------------------------------------------------
+  check                                            n       mean        std       last  flags
+  3-point stencil order on the same grid (kept f   9      1.086          0      1.086  
+  7-day IV, lift N=24 vs true rough Heston (frac   3     0.0634          0     0.0634  
+  95% interval coverage, 20 chains with 2% noise   1       0.95          0       0.95  
+  Carr-Madan insensitive to damping alpha          9   6.11e-16          0   6.11e-16  
+  Carr-Madan vs exact Black-76                     9   1.94e-16          0   1.94e-16  
+  ETDRK4 vs implicit trapezoidal + Richardson (H   9   3.79e-06   7.51e-18   3.79e-06  
+  Fourier vs Monte Carlo (sigmas)                  9     0.3618          0     0.3618  
+  Gauss-Legendre rules constructed                 9          1          0          1  
+  H from ATM skew (planted 0.12)                   9       0.12          0       0.12  
+  H from structure function, worst of 4 planted    9     0.0062          0     0.0062  
+  Heston: property switches on at alpha = kappa    6   1.38e-06          0   1.38e-06  
+  Ito isometry of the lift at 1 day, shortfall v   3       21.6          0       21.6  
+  Jacobian condition number at the solution        9      30.05          0      30.05  
+  K(t) = int e^-xt mu(dx) representation           9   6.67e-10          0   6.67e-10  
+  Labor Day weekend: Friday close to Tuesday ope   1       89.5          0       89.5  
+  Laplace-domain error on the pricing band z in    8    0.01419          0    0.01419  
+  Laplace-domain error, z in [0.1, 100] (plan as   1    0.03508          0    0.03508  
+  Laplace-domain error, z in [0.1, 100] (plan: 1   8    0.03508          0    0.03508  
+  Lewis vs Carr-Madan on Heston                    9   4.99e-15          0   4.99e-15  
+  Lewis vs exact Black-76                          9   3.55e-15          0   3.55e-15  
+  MLE plant-and-recover, worst |z|                 6      1.004   2.43e-16      1.004  
+  N=1 at x=0 reproduces closed-form Heston (ETDR   9   7.09e-10          0   7.09e-10  
+  NYSE 2026 holidays by rule vs the published ca   1          0          0          0  
+  QE step: mean vs exact conditional mean, in SE   3    0.02983          0    0.02983  
+  RMSE improvement minus steady-state theory       6     0.3392          0     0.3392  
+  SE(H), 20 quotes, equal weights, 0.5 vp noise    7    0.04711          0    0.04711  
+  SE(H), same quotes, vega^2 weights               7     0.2024          0     0.2024  
+  SE(H): inverse variance / vega^2                 3     0.1018   1.70e-17     0.1018  
+  SVI parameter recovery                           9   1.43e-08          0   1.43e-08  
+  SVI slice passes Durrleman                       9          1          0          1  
+  US close in UTC follows daylight saving          3          1          0          1  
+  adaptive: bad-print excursion (x normal error)   6      14.92   1.95e-15      14.92  
+  away from zero, 400 days: both filters' log-li   1      1.021          0      1.021  
+  branch continuity, shipped (max/median step)     9      5.242          0      5.242  
+  branch discontinuity, reciprocal form            9       2825          0       2825  
+  butterfly audit: catches a planted dent          9          2          0          2  
+  butterfly audit: false positives on a convex s   9          0          0          0  
+  calendar audit: catches a reversal               9          3          0          3  
+  calendar audit: clean on monotone w              9          0          0          0  
+  calibration objective evaluation                 9      10.46       3.14      16.45  
+  corr(H, xi) at the truth                         7     0.9776   1.20e-16     0.9776  
+  count variance / Hawkes (1971) closed form, 0.   6      1.019          0      1.019  
+  delayed greeks (tick 83) recorded, vega per 1.   3          1          0          1  
+  density non-negativity (min/peak)                9  -8.87e-10   1.10e-25  -8.87e-10  
+  discount factor from parity                      9   4.44e-16          0   4.44e-16  
+  dual vs joint EKF agreement                      6      0.129   3.04e-17      0.129  
+  exact-moment filter: QML kappa bias away from    3     0.6433          0     0.6433  
+  exptrap at 120 steps, u to 1200 (NOT unconditi   4   1.21e+36          0   1.21e+36  
+  exptrap at 120 steps, u to 1200, guards off (N   3   1.21e+36          0   1.21e+36  
+  fast scalar path vs generic matrix filter        6          0          0          0  
+  fd_first exact on a quadratic                    9   7.46e-14          0   7.46e-14  
+  fd_second on a quadratic vs its rounding floor   9       0.41          0       0.41  
+  filter profile likelihood: |H_hat - 0.12| in S   3      1.051          0      1.051  
+  fitted RMSE on clean data                        9   4.06e-09          0   4.06e-09  
+  forward from put-call parity                     9   1.14e-13          0   1.14e-13  
+  full N-node lift at H = 0.4999 vs Heston         9   1.64e-05   2.22e-17   1.64e-05  
+  implied-vol round trip                           9   8.05e-16          0   8.05e-16  
+  kernel error on [1 hour, 2 y]                    9   0.008697          0   0.008697  
+  kernel error, N=24, t in [1 day, 2 y]            9   0.008697          0   0.008697  
+  kernel error, N=24, worst over H in [0.08, 0.5   3    0.00972          0    0.00972  
+  kernel error, N=32, worst over the whole H box   3   0.006656   1.06e-18   0.006656  
+  kurtosis vs scale-mixture closed form, in SE     6     0.7597          0     0.7597  
+  lecture AR(1) kappa on noisy quotes / true kap   6       12.6          0       12.6  
+  lifted path vs true-kernel Volterra path (L2,    9   0.008001          0   0.008001  
+  lifted recursion == SOE convolution (identity)   9   4.05e-14          0   4.05e-14  
+  lifted rough filter: RMSE improvement over quo   6      43.54      4.242      39.67  
+  log-likelihood of H = 0.49 against the best H    3       -266          0       -266  
+  mean rate vs mu/(1-n), in SE                     6     0.5936          0     0.5936  
+  min |corr(H, xi)| over all schemes and designs   3     0.9219          0     0.9219  
+  naive-form cancellation at xi=1e-6 (kept to pr   9   3.44e-05          0   3.44e-05  
+  near zero (V = 0 on 14% of days): particle log   1      58.25          0      58.25  
+  near zero: CF filter vs particle filter log-li   1     0.3773          0     0.3773  
+  norm_cdf vs scipy                                9   2.22e-16          0   2.22e-16  
+  norm_pdf vs scipy                                9          0          0          0  
+  phi(-i) = 1 (martingale)                         9          0          0          0  
+  phi(-u) = conj(phi(u))                           9          0          0          0  
+  phi(0) = 1                                       9          0          0          0  
+  plant-and-recover, worst relative error          9   3.13e-11          0   3.13e-11  
+  planted omega = 0.2 recovered from a noise-fre   1          0          0          0  
+  put-call parity C-P = F-K                        9   2.84e-14          0   2.84e-14  
+  quadrature of the integrated-variance moments    3   1.07e-15          0   1.07e-15  
+  quadrature tolerance 1e-12 vs 1e-14              9          0          0          0  
+  recursive MLE (Ljung) distance from the MLE      6     0.2287          0     0.2287  
+  replay round-trip fidelity                       9          0          0          0  
+  risk-neutral density mass                        9          1          0          1  
+  risk-neutral density mean = forward              9          1   1.18e-16          1  
+  robust: steps to re-converge (and ignores the    6        1.5          0        1.5  
+  rough (driver jumps): pairs with the property    6          0          0          0  
+  rough objective evaluation, 10 expiries x 13 s   9     0.7514     0.1904      1.065  rolling mean 0.751 > 0.75 (last 9)
+  rough variance simulated 3000 days: minimum      3  -2.08e-17          0  -2.08e-17  
+  runaway parameters: maturities priced in-band    7          4          0          4  
+  sampling density: min >= eps and mass = 1        9          0          0          0  
+  scipy modules on the live import path            9          0          0          0  
+  second spike: superposition identity, 4 hosts    6   8.88e-16          0   8.88e-16  
+  shipped 2nd derivative: order on a $1/$5 kink    9      3.077          0      3.077  
+  simulated E[S/F] = 1                             9   1.94e-06          0   1.94e-06  
+  snapshot instant recovered from the taus (loca   1          0          0          0  
+  spread of kappa under 0.5vp noise                9      34.73          0      34.73  
+  spread of kappa with a Tikhonov prior (weight    9    0.07281          0    0.07281  
+  spread of rho under 0.5vp noise                  9       3.73          0       3.73  
+  spread of theta under 0.5vp noise                9      2.803          0      2.803  
+  spread of v0 under 0.5vp noise                   9      3.775          0      3.775  
+  spread of xi under 0.5vp noise                   9      19.13          0      19.13  
+  stability constants enforced: the same solve r   3          1          0          1  
+  stability-sized exptrap, same u range: max |ph   7     0.9988          0     0.9988  
+  startup to actionable error, no TWS              9     0.6115     0.1305     0.6876  
+  strict: steps to re-converge after the regime    6         18          0         18  
+  tau: 17:00 Istanbul to next close, hours         3         30          0         30  
+  time rescaling KS p, Hawkes fit (should pass)    6     0.5838   1.22e-16     0.5838  
+  time rescaling KS p, Poisson fit to the same e   6          0          0          0  
+  trap / shipped separation                        9      538.9          0      538.9  
+  two independent H routes agree                   9   0.002891          0   0.002891  
+  unpriceable quote: minimum charge (vol) vs 0 b   7      4.754          0      4.754  
+  variance cf (Riccati) vs exact affine mean and   1   1.78e-08          0   1.78e-08  
+  variance time at omega = 1 vs ACT/365            1          0          0          0  
+  vega vs central difference                       9   4.23e-09          0   4.23e-09  
+  worst-case RMS error in H: hybrid (anchors x25   3    0.03783          0    0.03783  
+  xi -> 0 degenerates to Black-Scholes             9   2.22e-16          0   2.22e-16  
+  |phi(u)| <= 1                                    9     0.9999          0     0.9999  
+  1 flagged
