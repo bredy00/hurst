@@ -1,10 +1,10 @@
-costs measured (36s)
-seed 10: CIR MLE kappa 46.8 +/- 9.4; 5-day RMSE lifted/CIR: var 0.0434/0.0439, drag 2.87e-04/2.92e-04  (47s)
-seed 11: CIR MLE kappa 97.8 +/- 6.1; 5-day RMSE lifted/CIR: var 0.0315/0.0315, drag 2.05e-04/2.04e-04  (61s)
+costs measured (41s)
+seed 10: CIR MLE kappa 46.8 +/- 9.4; 5-day RMSE lifted/CIR: var 0.0434/0.0439, drag 2.87e-04/2.92e-04  (52s)
+seed 11: CIR MLE kappa 97.8 +/- 6.1; 5-day RMSE lifted/CIR: var 0.0315/0.0315, drag 2.05e-04/2.04e-04  (63s)
 seed 12: CIR MLE kappa 37.4 +/- 8.1; 5-day RMSE lifted/CIR: var 0.0435/0.0439, drag 2.84e-04/2.89e-04  (73s)
 
-Cost per filter step: CIR scalar 1.2 us, CIR matrix path 33.4 us, lifted N=24 exact 200 us, Euler 82 us
-Likelihood over 2000 days: CIR 4.0 ms, lifted exact 403 ms. Fit kappa: CIR 0.17 s, lifted 24.1 s; CIR all four: 1.83 s
+Cost per filter step: CIR scalar 1.3 us, CIR matrix path 33.3 us, lifted N=24 exact 202 us, Euler 79 us
+Likelihood over 2000 days: CIR 3.3 ms, lifted exact 248 ms. Fit kappa: CIR 0.17 s, lifted 28.5 s; CIR all four: 2.53 s
 
 CIR profile log-likelihood, kappa fixed, relative to the CIR MLE (95% CI needs > -1.92): 30: -2.9, 35: -2.0, 40: -1.4, 45: -1.2, 50: -1.2, 55: -1.4, 60: -1.7, 70: -2.6
 

@@ -10,48 +10,73 @@ volsurf_core.py                       pure maths: no IO, no scipy, no matplotlib
 volatility_surface_3.py               v2's fixes + correct coordinates
 fit/svi.py                            raw SVI slice fitting, scipy-free
 sources/replay.py                     JSON record / replay of a chain snapshot
+sources/history.py                    daily history -> realised / Garman-Klass / implied variance
+sources/synthetic.py                  a recording and a history with a KNOWN answer
+record_chains.py                      record real IBKR chains through the replay source
+record_history.py                     pull daily OHLC, IV/HV indices and 5-minute bars from IBKR
+fake_ib.py                            offline stand-in for TWS (tests, CI, synthetic runs)
+run_real_data.py                      recording -> calibration; history -> filters; four readings of H
 models/heston.py                      Heston cf (Albrecher branch) + MC
 pricing/fourier.py                    Lewis + Carr-Madan, adaptive composite quadrature
-models/rough_heston.py                lifted rough Heston: kernel, lift, Riccati cf, Lewis pricer
+models/rough_heston.py                lifted rough Heston: kernel, lift, Riccati cf, Lewis pricer,
+                                      exact affine moments + positivity-preserving (QE) step
+models/rough_heston_adams.py          TRUE rough Heston cf by fractional Adams (validation only)
 models/hawkes.py                      Hawkes process: exact simulation, closed forms, MLE, time rescaling
 models/jump_hosts.py                  Hawkes jumps on OU / Heston / rough Heston, exact expectations
-filters/kalman.py                     Kalman on OU / CIR / lifted rough; adaptive, robust, dual, recursive MLE
+filters/kalman.py                     Kalman on OU / CIR / lifted rough; adaptive, robust, dual, recursive MLE;
+                                      exact-moment rough filter, realised-variance filter, H learned
 calibrate/objective.py                implied-vol loss; model failure is charged, never zeroed
-calibrate/fit.py                      Levenberg-Marquardt, generic over the model; Tikhonov prior
+calibrate/fit.py                      Levenberg-Marquardt, generic over the model; Tikhonov prior;
+                                      post-fit kernel and stability checks
+calibrate/weights.py                  vega^2 / inverse-variance / hybrid weights, short-end skew anchors
 capture_v2.py / capture_v3.py         stand-in feeds + comparison images
 capture_rough_vs_heston.py            Phase 2 headline: both models, in-model + stylised market
 study_h_identifiability.py            Gauss-Newton standard error of H by surface design
 capture_session_f.py                  Session F figure: intensity, shock responses, kurtosis, filters
+capture_session_g.py                  Session G figure: positivity, stability, weights, learning H
+study_h_weighting.py                  which weights pin H: SE, corr(H, xi), bias under misspecification
+study_cir_vs_rough.py                 CIR vs lifted rough filter: cost, forecasts, volatility drag, kappa sweep
+study_lewis_isometry.py               Ito isometry of the lift, cf drag identity, Lewis tail, lift vs Adams
+benchmark_riccati.py                  einsum vs matmul vs pinned BLAS in the Riccati step, per n_u
 debug_fbm_helper.py                   the Session A fBm fixture bug, reproduced
 debug_fd_methods.py                   which 2nd-derivative stencil holds order on real grids
-test_core.py                         103 checks   (the maths)
+test_core.py                         108 checks   (the maths; G: the clock)
 test_fixes.py                         47 checks   (IBKR runtime behaviour)
 test_surface.py                       45 checks   (audit, SVI, density, replay)
 test_models.py                        25 checks   (Heston cf)
 test_pricing.py                       29 checks   (Fourier pricers)
 test_calibrate.py                     65 checks   (objective, LM, identifiability, prior)
-test_rough.py                         58 checks   (Session D: kernel, lift, cf, robustness)
-test_rough_calibration.py             27 checks   (Session E: calibration, H, skew)
+test_rough.py                         72 checks   (Session D + G: kernel, lift, cf, stability, positivity)
+test_rough_calibration.py             35 checks   (Session E: calibration, H, skew; G: weights)
 test_hawkes.py                        54 checks   (Session F1: Hawkes on three hosts)
-test_filters.py                       34 checks   (Session F2: Kalman on three hosts)
+test_filters.py                       46 checks   (Session F2 + G: Kalman on three hosts, learning H)
+test_recording.py                     37 checks   (Session G: IBKR recording offline, pipeline end to end)
+conftest.py / pytest.ini              every suite runs under pytest; `-m "not slow"` is the quick tier
+.github/workflows/ci.yml              quick tier on push; full tier + health trend weekly / on demand
+docs/tutorial-ibkr-recording.md       how to install, log in and record (the part that needs Akin)
 docs/superpowers/plans/               the six-session rough Heston plan
 captures/                             frames, GIFs, comparisons, snapshot.json
 .venv/                                python 3.12.3
 ```
 
 ```bash
-.venv/Scripts/python.exe test_core.py     # 87 passed
+.venv/Scripts/python.exe test_core.py     # 108 passed
 .venv/Scripts/python.exe test_fixes.py    # 47 passed
 .venv/Scripts/python.exe test_surface.py  # 45 passed
-.venv/Scripts/python.exe test_models.py   # 20 passed
+.venv/Scripts/python.exe test_models.py   # 25 passed
 .venv/Scripts/python.exe test_pricing.py  # 29 passed
 .venv/Scripts/python.exe test_calibrate.py # 65 passed
-.venv/Scripts/python.exe test_rough.py     # 58 passed
-.venv/Scripts/python.exe test_rough_calibration.py  # 27 passed, ~4 min
+.venv/Scripts/python.exe test_rough.py     # 72 passed, ~2 min
+.venv/Scripts/python.exe test_rough_calibration.py  # 35 passed, ~4 min
 .venv/Scripts/python.exe capture_rough_vs_heston.py # Phase 2 headline, ~6 min
 .venv/Scripts/python.exe test_hawkes.py    # 54 passed, ~15 s
-.venv/Scripts/python.exe test_filters.py   # 34 passed, ~2.5 min
+.venv/Scripts/python.exe test_filters.py   # 46 passed, ~5 min
 .venv/Scripts/python.exe capture_session_f.py # Session F figure
+.venv/Scripts/python.exe -m pytest -m "not slow"  # quick tier, ~3 min
+.venv/Scripts/python.exe test_recording.py # 37 passed, ~30 s
+.venv/Scripts/python.exe -m pytest                # everything: 83 items, 563 checks, ~11 min
+.venv/Scripts/python.exe record_chains.py --check # IBKR smoke test (needs IB Gateway)
+.venv/Scripts/python.exe run_real_data.py --synthetic   # pipeline on a known answer
 .venv/Scripts/python.exe capture_heston.py      # Heston's own skew term structure
 .venv/Scripts/python.exe capture_calibration.py # Phase 1 baseline vs a rough surface
 .venv/Scripts/python.exe capture_v3.py    # re-render + end-to-end validation
@@ -59,7 +84,8 @@ captures/                             frames, GIFs, comparisons, snapshot.json
 
 ## Environment
 
-No TWS or IB Gateway on this machine; nothing listens on 7496/7497/4001/4002.
+No TWS or IB Gateway on this machine yet; nothing listens on 7496/7497/4001/4002.
+Recording real data needs a login: docs/tutorial-ibkr-recording.md.
 The capture harnesses drive the real plotting code with a stand-in feed. They do
 not modify any surface script.
 
@@ -487,16 +513,122 @@ See `captures/session_f.png`.
 calibrate 65, rough 58, rough calibration 27, hawkes 54, filters 34.
 Health checks 90 of 90.
 
+## Session G (2026-09-15) -- review fixes, the recorder, learning H, pytest and CI
+
+### Four real-data bugs, found before any real quote
+All pinned in `test_core.py` / `test_recording.py`, found while building the recorder
+and its offline fake exchange (`fake_ib.py`):
+
+| bug | effect on real data |
+|---|---|
+| `tau_years` compared naive LOCAL time with a "UTC" close that ignored DST | every live tau ~2 h short on this UTC+3 machine: 7% at one day, where H lives |
+| IBKR vega is per vol point, the code assumed per 1.00 | iv_error 100x too big; the usability filter would have dropped almost every quote |
+| delayed data sends greeks on tick 83, only 13 was read | a delayed-data session records no implied vols |
+| live -> delayed fallback never re-sent the spot request (from v2) | the fallback could never produce a price |
+
+`record_chains.py` records self-consistent cycles (fresh put-call parity forwards,
+a sigma band around them, per-cycle request ids so late ticks cannot land on another
+contract), expiries by target maturity (dailies crowd the first n), with `--check`
+verifying vega units on the first real quote. `record_history.py` pulls daily OHLC,
+IBKR's 30-day IV/HV and 5-minute bars (a week per request, paced).
+
+### Positivity (flag 3)
+`LiftedAffineStep`: in eigen-coordinates of D A D^-1 (symmetric), every lifted
+coordinate is a scalar OU driven by the same sqrt(V) dB, so the conditional mean and
+covariance over a step are closed-form -- the Ito isometry evaluated exactly (matches
+quadrature to 3.5e-12). Andersen's QE draw for V (never negative, both moments
+exact), the surprise split across factors along the conditional regression with
+c-orthogonal noise, and the orthogonal noise drawn JOINTLY with the return's dZ
+(drawing it independently lost the skew: +2.0e-3 on a k = +0.08 call).
+
+- V never below zero (min -2e-17); Euler: below zero on 13% of days.
+- Prices at 250 steps, xi = 0.5: worst bias 2.7e-4 vs Euler's 1.2e-3; martingale.
+- QML kappa (one Newton step from the truth, 6 seeds): Euler floor -2.63 SE;
+  exact-moment filter on QE data, V away from zero **+0.23 SE (unbiased)**; V at zero
+  on ~13% of days +1.79 SE -- and -0.65 with smaller noise, z spread ~2: a Gaussian
+  quasi-likelihood is unreliable at the boundary. Floor bias removed; the boundary
+  needs a non-Gaussian filter (open flag).
+
+### Stability constants are hard assertions
+`log_char_func` refuses a mesh whose largest step exceeds `max_stable_step`
+(StabilityError, "needs >= 383 steps, got 120"); `char_func` refuses |cf| > 1 on
+-1 <= Im u <= 0 (Jensen: |E[S^a]| <= 1 there for any martingale). Rough calibration
+re-prices every expiry from scratch at the fit (`verify_stability`) and checks the
+kernel error at the FITTED H: N = 24 breaches 1% below H ~ 0.08 (1.13% at 0.02),
+so such fits are polished again with N = 32 (0.67% worst on the whole box).
+
+### Weights for H
+`corr(H, xi) = 0.9776` was the EQUAL-weight value; it is 0.92-0.99 under every
+scheme -- structural, not a weighting artefact. On a 90-quote recorder-like surface
+with realistic spreads, RMS error in H:
+
+| scheme | long end wrong | short end wrong |
+|---|---|---|
+| vega^2 | 0.098 | 0.075 |
+| inverse variance | **0.026** | 0.087 |
+| hybrid (skew anchors) | 0.028 | 0.055 |
+| hybrid, anchors x25 | 0.038 | **0.032** |
+
+Inverse variance cuts SE(H) ~10x against vega^2; skew anchors buy the best worst case.
+`run_real_data.py` uses the hybrid by default.
+
+### Learning H in the filter
+`profile_h` (xi, optionally kappa, re-fitted at each H), `filter_bank` (posterior over
+an H grid, online) and `recursive_mle` on `LiftedRoughModelH` (H as a filter
+parameter; the observation vector moves with H and the sensitivity equations carry
+it). True H = 0.12: 0.133 +/- 0.012 with xi free, H = 0.49 rejected by 266 log-lik;
+recursive MLE from 0.30 to 0.119 in 1200 days (offline 0.115).
+
+**Realised variance is an integral.** Fed daily RV as if it were spot variance, the
+filter returned H = 0.39 for a true 0.10. `LiftedRoughRVModel` observes the day's
+integrated variance (state augmented, joint moments by graded Gauss-Legendre,
+checked to 6.6e-16) with RV's own sampling noise: **0.061 +/- 0.027**.
+
+### The review's questions, measured
+- **Ito isometry.** The lift is exactly isometric for its own kernel, but its variance
+  of the Volterra driver is 21.6% short of the true kernel's at one day (6.4% at a
+  year): 93% of the gap sits at lags under 7 minutes, where K^2 ~ s^-0.76 piles its
+  mass. The sup-norm kernel error (0.87%) cannot see it. Prices integrate it away:
+  against the TRUE rough Heston cf (fractional Adams, own error 2.5e-5 vp), the lift
+  is off by 0.15 vp at one day (skew -1.6%), 0.04 vp at 30 days.
+- **Tail at the cut-off.** A fixed Lewis cut-off at U = 25-200 mis-prices 1-7 day wings
+  by 1-39 vol points; the checked cut-off (2410 at one day) keeps it ~1e-4 vp.
+- **Drag in the cf.** E[X_T] = -i phi'(0) equals -1/2 E[int V] to 2.5e-8.
+- **CIR vs rough filter.** 1.2 us vs 120-200 us a step; a kappa fit 0.17 s vs 19-29 s. kappa ~ 50
+  is not robust: MLE 37, 47 and 98 on three seeds, profile flat over 36-62. Point
+  forecasts of variance and drag stay within +0.2..+2.4% (5 d) for kappa in 30-70, but
+  CIR under-states the 1-day drag's uncertainty (model SD / realised 0.68-0.79,
+  90% band covers 85-89%); the lift is calibrated (1.05, 93%).
+- **einsum vs matmul.** Against the committed Session D loop the Session E change is
+  1.5-1.9x at n_u = 256-512 and 0.5-1.0x elsewhere, not "6-13x"; thread dispatch is
+  80-130 us a call, not 1.3 ms. Single-threaded matmul is the fastest contraction at
+  every n_u; calibration now pins BLAS to one thread (end-to-end gain within timing
+  noise on this laptop).
+
+### Engineering
+**563 checks in 83 pytest items, all green** (11 min). All suites under pytest via `conftest.py` (a test fails if any of its checks failed;
+the per-suite check counts print at the end), quick / full tiers, GitHub Actions with
+the health-check history carried across runs in the Actions cache. Health checks
+107 of 107; trend rules for the review's targets (rough objective rolling mean <= 0.75 s
+on the same host, recursive-MLE deviation max < 2 SE over 20 runs, kernel error < 0.01).
+
+See `captures/session_g.png`, `captures/cir_vs_rough.png`, `captures/lewis_isometry.png`,
+`captures/riccati_benchmark.png`.
+
 ## Still open
 
-- **After Session F**: learning H itself in the filter (H defines the lifted
-  factors, so a parameter filter would change what the state means), a
-  positivity-preserving scheme for rough variance (the floor biases QML),
-  Hawkes estimation from real event data, and the nearly-unstable Hawkes →
-  rough volatility link as a model rather than a citation.
+- **Real data has not been recorded yet**: IB Gateway needs Akin's login
+  (docs/tutorial-ibkr-recording.md). Everything downstream runs on a synthetic
+  recording with a known answer.
+- QML near the zero boundary (V at zero on ~13% of days): a Gaussian quasi-likelihood
+  is unreliable there; needs a non-Gaussian (particle / characteristic-function) filter.
+- The lift's short-lag isometry gap (21.6% at one day) matters for intraday-variance
+  estimation of H; a finer lift (N = 40, eta_N = 1e8) cuts it with a cost.
+- Hawkes estimation from real event data, and the nearly-unstable Hawkes -> rough
+  volatility link as a model rather than a citation.
 - eSSVI (calendar-arbitrage-free by construction; `essvi_calendar_ok` measures
   but does not prevent).
 - The live IBKR path has still never run against a real TWS.
-- `volatility_surface_3.py` (963 lines) should be split; no pytest / CI.
+- `volatility_surface_3.py` (~1000 lines) should be split.
 - A rough fit is ~1 s per ten-expiry objective evaluation: fine for a study,
   slow for a live recalibration loop.

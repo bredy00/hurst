@@ -502,14 +502,18 @@ def h_lift():
         worst = max(worst, float(np.max(np.abs(a - b))))
     record("Markovian lift", "ETDRK4 vs implicit trapezoidal + Richardson (H=0.12)", worst,
            5e-6, worst < 5e-6, note="independent time-steppers, 1 d / 30 d / 1 y")
-    t0 = time.perf_counter()
-    for d_ in (1, 2, 3, 7, 14, 30, 60, 90, 180, 365):
-        tau = d_ / 365
-        band = 3 * 0.2 * math.sqrt(tau)
-        rh.call_prices(np.linspace(-band, band, 13), tau, Pr)
-    dt_obj = time.perf_counter() - t0
+    runs = []
+    for _ in range(3):            # best of three: a laptop under load or throttling reads 0.85-1.05 s
+        t0 = time.perf_counter()
+        for d_ in (1, 2, 3, 7, 14, 30, 60, 90, 180, 365):
+            tau = d_ / 365
+            band = 3 * 0.2 * math.sqrt(tau)
+            rh.call_prices(np.linspace(-band, band, 13), tau, Pr)
+        runs.append(time.perf_counter() - t0)
+    dt_obj = min(runs)
     record("Markovian lift", "rough objective evaluation, 10 expiries x 13 strikes", dt_obj, 3.0,
-           dt_obj < 3.0, unit="s", note="auto scheme; vanilla Heston is ~14 ms")
+           dt_obj < 3.0, unit="s", note=f"best of 3 (all: {', '.join(f'{r:.2f}' for r in runs)}); "
+           "trend target: rolling mean <= 0.75 s")
 
 
 # ------------------------------------------------------------- Session E
@@ -704,6 +708,124 @@ def h_kalman():
            unit="%", note="24 lifted factors as the state, rank-one Q")
 
 
+# ------------------------------------------------------------- Session G
+def h_recording():
+    import datetime as _dt
+    import volatility_surface_3 as v3
+    ist = _dt.timezone(_dt.timedelta(hours=3))
+    got = vc.tau_years(_dt.datetime(2026, 9, 15, 17, 0, tzinfo=ist), _dt.date(2026, 9, 16)) * 365 * 24
+    record("Recording (real data)", "tau: 17:00 Istanbul to next close, hours", got, 30.0, abs(got - 30.0) < 1e-9,
+           unit="h", note="a naive local clock gave 27 h (fixed in Session G)")
+    dst_ok = vc.us_close_utc(_dt.date(2026, 9, 15)).hour == 20 and vc.us_close_utc(_dt.date(2026, 12, 15)).hour == 21
+    record("Recording (real data)", "US close in UTC follows daylight saving", float(dst_ok), 1.0, dst_ok)
+    app = v3.LiveSurfaceApp()
+    app.id_map[7] = ("20261016", 650.0, "C")
+    app.tickOptionComputation(7, 83, 0, 0.15, 0.5, 12.0, 0.0, 0.01, 0.744, -0.05, 650.0)
+    q = app.quotes.get(7)
+    ratio = (q.vega / 74.4) if q is not None else float("nan")
+    record("Recording (real data)", "delayed greeks (tick 83) recorded, vega per 1.00 vol", ratio, 1.0,
+           q is not None and abs(ratio - 1.0) < 1e-12, unit="x", note="IBKR sends vega per vol point")
+
+
+def h_positivity():
+    import models.rough_heston as rh
+    import filters.kalman as kf
+    w, x = rh.lift_nodes(0.12, 24)
+    st = rh.LiftedAffineStep(w, x, 0.04, 3.0, 0.04, 0.3, 1 / 252)
+    U_star = st.U_from_y(st.y_star[:, None])[:, 0]
+    g = rh._phi1(-x / 252)
+    U0 = U_star + g * ((0.08 - st.V_star) / float(w @ g))
+    y0 = st.T @ U0
+    n = 200_000
+    _, V = st.step_y(np.repeat(y0[:, None], n, axis=1), np.random.default_rng(3))
+    m = 0.04 + st.c @ (st.e * y0 + st.mean_add)
+    s2 = st.s2_const + st.s2_lin @ y0
+    z = (V.mean() - m) / math.sqrt(s2 / n)
+    record("Positivity (Session G)", "QE step: mean vs exact conditional mean, in SE", abs(z), 4.0, abs(z) < 4.0,
+           unit="SE", note=f"variance {100*(V.var()/s2-1):+.2f}% vs exact; min V {V.min():.1e}")
+    record("Positivity (Session G)", "quadrature of the integrated-variance moments", st.check_quadrature(y0), 1e-12,
+           st.check_quadrature(y0) < 1e-12, unit="rel")
+    pz = dict(kappa=3.0, theta=0.04, xi=0.3, R=0.01 ** 2)
+    mq = kf.LiftedRoughModel(1 / 252, H=0.12, v0=0.04)
+    Vq, _ = kf.simulate_rough(mq, pz, 3000, seed=61)
+    me = kf.LiftedRoughModel(1 / 252, H=0.12, v0=0.04, discretisation="euler")
+    Ve, _ = kf.simulate_rough(me, pz, 3000, seed=61, substeps=1, scheme="euler")
+    record("Positivity (Session G)", "rough variance simulated 3000 days: minimum", float(Vq.min()), -1e-12,
+           float(Vq.min()) >= -1e-12, note=f"Euler at the same parameters: below zero on {100*np.mean(Ve < 0):.0f}% of days")
+    nf = dict(kappa=3.0, theta=0.09, xi=0.08, R=0.01 ** 2)
+    mn = kf.LiftedRoughModel(1 / 252, H=0.12, v0=0.09)
+    zs = []
+    for seed in (61, 63):
+        Vn, _ = kf.simulate_rough(mn, nf, 3000, seed=seed)
+        yn = Vn + np.random.default_rng(600 + seed).normal(0.0, 0.01, 3000)
+        ll = [kf.kalman_filter(mn, dict(nf, kappa=3.0 + e), yn)["loglik"] for e in (-0.15, 0.0, 0.15)]
+        info = -(ll[2] - 2 * ll[1] + ll[0]) / 0.15 ** 2
+        zs.append((ll[2] - ll[0]) / 0.3 / math.sqrt(info) if info > 0 else float("nan"))
+    record("Positivity (Session G)", "exact-moment filter: QML kappa bias away from zero, mean z", abs(float(np.mean(zs))),
+           2.0, abs(float(np.mean(zs))) < 2.0, unit="SE",
+           note="near zero a Gaussian quasi-likelihood is unreliable (open flag)")
+
+
+def h_lift_fidelity():
+    import models.rough_heston as rh
+    import models.rough_heston_adams as ad
+    Pr = rh.RoughHestonParams(0.04, 2.0, 0.045, 0.5, -0.7, 0.12)
+    tau = 7 / 365
+    sd = math.sqrt(Pr.v0 * tau)
+    ks = np.array([-2.5, -0.5, 0.0, 0.5, 1.0]) * sd
+    um = 1.3 * rh.u_max_for(Pr, tau)
+    ref = fo.implied_vols_from_calls(ad.lewis_prices_from_logcf(ks, lambda z: ad.adams_log_cf(z, tau, Pr, 1000), um), ks, tau)
+    lift = fo.implied_vols_from_calls(ad.lewis_prices_from_logcf(ks, lambda z: rh.log_char_func(z, tau, Pr, steps_mult=2.0), um),
+                                      ks, tau)
+    err = float(np.max(np.abs(lift - ref))) * 100
+    record("Lift fidelity (Session G)", "7-day IV, lift N=24 vs true rough Heston (fractional Adams)", err, 0.1,
+           err < 0.1, unit="vp", note="1 day: 0.15 vp, skew -1.6% (study_lewis_isometry.py)")
+    w, x = rh.lift_nodes(0.12, 24)
+    t = 1 / 365
+    r = x[:, None] + x[None, :]
+    iso_lift = float((np.outer(w, w) * (-np.expm1(-r * t)) / r).sum())
+    iso_true = t ** 0.24 / (0.24 * math.gamma(0.62) ** 2)
+    gap = 100 * (1 - iso_lift / iso_true)
+    record("Lift fidelity (Session G)", "Ito isometry of the lift at 1 day, shortfall vs true kernel", gap, 25.0,
+           gap < 25.0, unit="%", note="93% of it from lags under 7 minutes; prices integrate it away")
+
+
+def h_weighting():
+    import study_h_weighting as shw
+    if not shw.CACHE.exists():
+        record("H weighting (Session G)", "cached Jacobians (captures/h_weighting_jacobians.npz)", 0.0, 1.0, False,
+               note="run study_h_weighting.py once")
+        return
+    out = shw.run(verbose=False)
+    d, sp = "recorder surface, 10 expiries x 9", "spread-based noise (tick + 2.5% of value)"
+    g = lambda sc: out[(d, sp, sc)]
+    ratio = g("inverse_variance")["se_H"] / g("vega2")["se_H"]
+    record("H weighting (Session G)", "SE(H): inverse variance / vega^2", ratio, 0.25, ratio < 0.25, unit="x",
+           note=f"{g('vega2')['se_H']:.4f} -> {g('inverse_variance')['se_H']:.4f}")
+    worst = lambda sc: max(math.hypot(g(sc)["se_H"], g(sc)["bias_H"]), math.hypot(g(sc)["se_H"], g(sc)["bias_H_short"]))
+    record("H weighting (Session G)", "worst-case RMS error in H: hybrid (anchors x25)", worst("hybrid x25"),
+           worst("inverse_variance"), worst("hybrid x25") < worst("inverse_variance"),
+           note=f"inverse variance {worst('inverse_variance'):.3f}, vega^2 {worst('vega2'):.3f}")
+    corr = min(abs(v["corr_H_xi"]) for v in out.values())
+    record("H weighting (Session G)", "min |corr(H, xi)| over all schemes and designs", corr, 0.9, corr > 0.9,
+           note="structural: re-weighting cannot remove it")
+
+
+def h_learn_h():
+    import filters.kalman as kf
+    pz = dict(kappa=3.0, theta=0.06, xi=0.15, R=0.005 ** 2)
+    m = kf.LiftedRoughModel(1 / 252, H=0.12, v0=0.06)
+    V, _ = kf.simulate_rough(m, pz, 1500, seed=1)
+    y = V + np.random.default_rng(901).normal(0.0, 0.005, 1500)
+    prof = kf.profile_h(y, (0.05, 0.08, 0.12, 0.17, 0.25, 0.35, 0.49), pz, 1 / 252, 0.06, names=("xi",))
+    z = abs(prof["H_hat"] - 0.12) / prof["se_quadratic"]
+    record("Learning H (Session G)", "filter profile likelihood: |H_hat - 0.12| in SE", z, 3.0, z < 3.0, unit="SE",
+           note=f"H_hat {prof['H_hat']:.3f} +/- {prof['se_quadratic']:.3f}, xi re-fitted at each H")
+    dll = float(prof["loglik"][-1] - prof["loglik"].max())
+    record("Learning H (Session G)", "log-likelihood of H = 0.49 against the best H", dll, -20.0, dll < -20.0,
+           note="Heston-like roughness rejected with xi free")
+
+
 # ------------------------------------------------------------------ engineering
 def h_engineering():
     out = subprocess.run(
@@ -783,7 +905,8 @@ CHECKS = [h_normal, h_black_scholes, h_finite_difference, h_char_func,
           h_branch_cut, h_bs_degeneracy, h_pricers, h_monte_carlo, h_density,
           h_hurst, h_forward, h_svi, h_arbitrage, h_calibration,
           h_fractional_kernel, h_lift, h_rough_robustness, h_identifiability_rough,
-          h_hawkes, h_kalman, h_engineering, h_replay]
+          h_hawkes, h_kalman, h_recording, h_positivity, h_lift_fidelity, h_weighting, h_learn_h,
+          h_engineering, h_replay]
 
 
 def main():

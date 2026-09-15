@@ -367,6 +367,40 @@ State-space from the lecture notes:
 
 ---
 
+## Session G — review fixes, real data, learning H, CI (2026-09-15)
+
+From the 2026-09-15 analytics review and session list.
+
+### Task G1: Critical fixes
+- [x] Positivity-preserving lifted scheme (adapted QE on exact affine moments). *(V never < 0; floor bias removed; unbiased away from zero; near-zero Gaussian QML flagged)*
+- [x] Weighting for H: inverse variance and hybrid (short-end skew anchors). *(SE(H) 10x down vs vega²; hybrid best worst case; corr(H, ξ) structural at 0.92–0.99 — the 0.9776 was the equal-weight value)*
+- [x] Stability constants as hard assertions. *(StabilityError pre- and post-condition; post-fit re-pricing; kernel check at the fitted H with N = 32 refit)*
+- [x] Trend targets: rough objective rolling mean ≤ 0.75 s (same host), recursive MLE max < 2 SE over 20 runs, kernel error < 0.01.
+
+### Task G2: The review's questions
+- [x] |φ| ≤ 1: Jensen on −1 ≤ Im u ≤ 0 for any martingale; a violation is a solve, never a calibration value — but calibration can walk into regions that need more steps.
+- [x] CIR vs rough filter: cost, forecasts, volatility drag, κ sweep 30–70. *(study_cir_vs_rough.py)*
+- [x] Lewis contour / fBm / Itô isometry / tail at the cut-off, with the true rough Heston cf (fractional Adams) as reference. *(study_lewis_isometry.py)*
+- [x] einsum vs matmul analytics. *(benchmark_riccati.py: the Session E "6–13×" does not reproduce)*
+
+### Task G3: Real data
+- [x] Recorder (chains + history) through the replay source, offline-tested against a fake exchange. *(four real-data bugs fixed first)*
+- [x] Pipeline: recording → checks → hybrid-weighted surface → Heston + rough fits; history → CIR + rough filters with H learned; four readings of H. *(run_real_data.py; synthetic end-to-end recovers H = 0.10 as 0.085 ± 0.025)*
+- [ ] Record IBKR chains and history. **Blocked on the IB Gateway login** — tutorial in docs/tutorial-ibkr-recording.md.
+
+### Task G4: Model fidelity
+- [x] = G1 positivity scheme; the exact-moment filter replaces the Euler transition.
+
+### Task G5: Roughness filterable
+- [x] Profile likelihood over H, filter bank posterior, recursive MLE with H as a parameter.
+- [x] Realised variance observed as an integral (the spot-variance filter returned H = 0.39 for 0.10).
+
+### Task G6: Engineering
+- [x] All suites under pytest (conftest bridge), quick/full tiers, GitHub Actions.
+- [x] Private GitHub backup under bredy00.
+
+---
+
 ## Self-Review
 
 **Spec coverage.** Volterra kernels → D1–D2. Markovian lifting → D3. Laplace-transform node selection → D2. Discretisation of the non-Markovian process → D3–D4. Rough Heston → D4/E1. Hawkes mean-reverting jump diffusion → F1. Kalman and dual Kalman → F2. Model vs parameterisation → C2/E1 (plant-and-recover separates the two). Structure function and `ζ(q) = qH` → already shipped in `volsurf_core.py`, panel in A4. Phase 1/2/3 → Sessions B–C / D–E / F. Timeline → above.

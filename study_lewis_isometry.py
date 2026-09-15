@@ -231,15 +231,15 @@ def plot(res):
     t = np.array(res["A"]["t"])
     for name, col in (("H=0.05 N=24", "#9ecae1"), ("H=0.12 N=24", "#1f77b4"), ("H=0.3 N=24", "#08306b"),
                       ("H=0.12 N=32", "#2ca02c")):
-        a.semilogx(t * YEAR_MIN, 100 * np.array(res["A"]["curves"][name]), color=col, label=name)
-    for lab, tm in (("1 h", 60), ("1 d", 1440), ("1 y", 525600)):
+        short = -100 * np.array(res["A"]["curves"][name])
+        a.loglog(t * YEAR_MIN, np.maximum(short, 1e-3), color=col, label=name)
+    a.set_ylim(0.3, 100)
+    for lab, tm in (("5 min", 5), ("1 h", 60), ("1 d", 1440), ("1 y", 525600)):
         a.axvline(tm, color="0.8", lw=0.8)
-        a.text(tm, a.get_ylim()[0] if a.get_ylim() else 0, lab, fontsize=7, color="0.4")
-    a.axhline(0, color="0.5", lw=0.8)
-    a.set_ylim(-15, 5)
+        a.text(tm * 1.1, 0.4, lab, fontsize=7, color="0.35")
     a.set_xlabel("t (minutes)")
-    a.set_ylabel("lifted / true isometry - 1 (%)")
-    a.set_title("(A) Ito isometry: int K_N^2 vs int K^2 = t^(2H) / (2H Gamma(H+1/2)^2)")
+    a.set_ylabel("shortfall of the lift's isometry (%)")
+    a.set_title("(A) Ito isometry: 1 - int K_N^2 / int K^2   (21.6% at 1 day, N = 24)")
     a.legend(fontsize=8)
     a = ax[0, 1]
     lag = np.array(res["B"]["lag"]) * YEAR_MIN
@@ -254,7 +254,7 @@ def plot(res):
     a.legend(fontsize=8)
     a = ax[1, 0]
     for d_, col in ((1, "#d62728"), (7, "#ff7f0e"), (30, "#2ca02c"), (365, "#1f77b4")):
-        dd = res["D"]["decay"][d_]
+        dd = res["D"]["decay"].get(d_) or res["D"]["decay"][str(d_)]   # JSON keys are strings
         a.loglog(dd["u"], dd["absphi"], color=col, label=f"{d_} d")
         a.axvline(dd["u_max_for"], color=col, ls=":", lw=1)
     a.set_ylim(1e-16, 2)
@@ -264,7 +264,7 @@ def plot(res):
     a.legend(fontsize=8)
     a = ax[1, 1]
     for d_, col in ((1, "#d62728"), (7, "#ff7f0e"), (30, "#2ca02c")):
-        tr = res["D"]["truncation"][d_]
+        tr = res["D"]["truncation"].get(d_) or res["D"]["truncation"][str(d_)]
         U = [r["U"] for r in tr["rows"]]
         a.loglog(U, [max(max(r["iv_err_vp"][0], r["iv_err_vp"][2]), 1e-12) for r in tr["rows"]], "o-", color=col,
                  label=f"{d_} d, 2.5-sigma wings")
@@ -317,4 +317,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    if "--plot-only" in sys.argv:
+        plot(json.loads((ROOT / "captures" / "lewis_isometry.json").read_text(encoding="utf-8")))
+    else:
+        main()

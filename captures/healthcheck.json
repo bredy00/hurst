@@ -358,7 +358,7 @@
    "threshold": 0.01,
    "ok": true,
    "unit": "rel",
-   "note": "7 iters, 0.3s"
+   "note": "7 iters, 0.6s"
   },
   {
    "group": "Calibration",
@@ -461,6 +461,24 @@
   },
   {
    "group": "Markovian lift",
+   "name": "kernel error, N=24, worst over H in [0.08, 0.5]",
+   "measured": 0.009719760152666174,
+   "threshold": 0.01,
+   "ok": true,
+   "unit": "rel",
+   "note": "H = 0.05: 0.0105, H = 0.02: 0.0113 -- above 1%"
+  },
+  {
+   "group": "Markovian lift",
+   "name": "kernel error, N=32, worst over the whole H box [0.02, 0.5]",
+   "measured": 0.006655967055248549,
+   "threshold": 0.01,
+   "ok": true,
+   "unit": "rel",
+   "note": "what calibration refits with when a fit lands below H = 0.08"
+  },
+  {
+   "group": "Markovian lift",
    "name": "Laplace-domain error, z in [0.1, 100] (plan: 1%, see note)",
    "measured": 0.03507577343510438,
    "threshold": 0.05,
@@ -525,20 +543,29 @@
   {
    "group": "Markovian lift",
    "name": "rough objective evaluation, 10 expiries x 13 strikes",
-   "measured": 0.5892530999990413,
+   "measured": 0.6047810000018217,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
-   "note": "auto scheme; vanilla Heston is ~14 ms"
+   "note": "best of 3 (all: 0.97, 0.62, 0.60); trend target: rolling mean <= 0.75 s"
   },
   {
    "group": "Rough robustness",
-   "name": "exptrap at 120 steps, u to 1200 (NOT unconditionally stable)",
+   "name": "exptrap at 120 steps, u to 1200, guards off (NOT unconditionally stable)",
    "measured": 1.2104066067592526e+36,
    "threshold": 1.0,
    "ok": true,
    "unit": "",
    "note": "|phi(u - i/2)| must be <= 1; kept to prove the constraint"
+  },
+  {
+   "group": "Rough robustness",
+   "name": "stability constants enforced: the same solve raises StabilityError",
+   "measured": 1.0,
+   "threshold": 1.0,
+   "ok": true,
+   "unit": "",
+   "note": "hard precondition since Session G; |phi| <= 1 is a hard postcondition"
   },
   {
    "group": "Rough robustness",
@@ -750,11 +777,137 @@
   {
    "group": "Kalman",
    "name": "lifted rough filter: RMSE improvement over quotes",
-   "measured": 47.409820677758866,
+   "measured": 39.66544509985898,
    "threshold": 30.0,
    "ok": true,
    "unit": "%",
    "note": "24 lifted factors as the state, rank-one Q"
+  },
+  {
+   "group": "Recording (real data)",
+   "name": "tau: 17:00 Istanbul to next close, hours",
+   "measured": 30.0,
+   "threshold": 30.0,
+   "ok": true,
+   "unit": "h",
+   "note": "a naive local clock gave 27 h (fixed in Session G)"
+  },
+  {
+   "group": "Recording (real data)",
+   "name": "US close in UTC follows daylight saving",
+   "measured": 1.0,
+   "threshold": 1.0,
+   "ok": true,
+   "unit": "",
+   "note": ""
+  },
+  {
+   "group": "Recording (real data)",
+   "name": "delayed greeks (tick 83) recorded, vega per 1.00 vol",
+   "measured": 1.0,
+   "threshold": 1.0,
+   "ok": true,
+   "unit": "x",
+   "note": "IBKR sends vega per vol point"
+  },
+  {
+   "group": "Positivity (Session G)",
+   "name": "QE step: mean vs exact conditional mean, in SE",
+   "measured": 0.02983322098176512,
+   "threshold": 4.0,
+   "ok": true,
+   "unit": "SE",
+   "note": "variance -0.27% vs exact; min V 2.7e-11"
+  },
+  {
+   "group": "Positivity (Session G)",
+   "name": "quadrature of the integrated-variance moments",
+   "measured": 1.0714903730129076e-15,
+   "threshold": 1e-12,
+   "ok": true,
+   "unit": "rel",
+   "note": ""
+  },
+  {
+   "group": "Positivity (Session G)",
+   "name": "rough variance simulated 3000 days: minimum",
+   "measured": -2.0816681711721685e-17,
+   "threshold": -1e-12,
+   "ok": true,
+   "unit": "",
+   "note": "Euler at the same parameters: below zero on 13% of days"
+  },
+  {
+   "group": "Positivity (Session G)",
+   "name": "exact-moment filter: QML kappa bias away from zero, mean z",
+   "measured": 0.6432528014763671,
+   "threshold": 2.0,
+   "ok": true,
+   "unit": "SE",
+   "note": "near zero a Gaussian quasi-likelihood is unreliable (open flag)"
+  },
+  {
+   "group": "Lift fidelity (Session G)",
+   "name": "7-day IV, lift N=24 vs true rough Heston (fractional Adams)",
+   "measured": 0.06339609919561173,
+   "threshold": 0.1,
+   "ok": true,
+   "unit": "vp",
+   "note": "1 day: 0.15 vp, skew -1.6% (study_lewis_isometry.py)"
+  },
+  {
+   "group": "Lift fidelity (Session G)",
+   "name": "Ito isometry of the lift at 1 day, shortfall vs true kernel",
+   "measured": 21.597044708988346,
+   "threshold": 25.0,
+   "ok": true,
+   "unit": "%",
+   "note": "93% of it from lags under 7 minutes; prices integrate it away"
+  },
+  {
+   "group": "H weighting (Session G)",
+   "name": "SE(H): inverse variance / vega^2",
+   "measured": 0.1017895064660482,
+   "threshold": 0.25,
+   "ok": true,
+   "unit": "x",
+   "note": "0.0749 -> 0.0076"
+  },
+  {
+   "group": "H weighting (Session G)",
+   "name": "worst-case RMS error in H: hybrid (anchors x25)",
+   "measured": 0.037834775076697455,
+   "threshold": 0.08654395866168575,
+   "ok": true,
+   "unit": "",
+   "note": "inverse variance 0.087, vega^2 0.098"
+  },
+  {
+   "group": "H weighting (Session G)",
+   "name": "min |corr(H, xi)| over all schemes and designs",
+   "measured": 0.9219212029824897,
+   "threshold": 0.9,
+   "ok": true,
+   "unit": "",
+   "note": "structural: re-weighting cannot remove it"
+  },
+  {
+   "group": "Learning H (Session G)",
+   "name": "filter profile likelihood: |H_hat - 0.12| in SE",
+   "measured": 1.0509003382638875,
+   "threshold": 3.0,
+   "ok": true,
+   "unit": "SE",
+   "note": "H_hat 0.133 +/- 0.012, xi re-fitted at each H"
+  },
+  {
+   "group": "Learning H (Session G)",
+   "name": "log-likelihood of H = 0.49 against the best H",
+   "measured": -266.0317475827019,
+   "threshold": -20.0,
+   "ok": true,
+   "unit": "",
+   "note": "Heston-like roughness rejected with xi free"
   },
   {
    "group": "Engineering",
@@ -768,7 +921,7 @@
   {
    "group": "Engineering",
    "name": "startup to actionable error, no TWS",
-   "measured": 0.5384939999930793,
+   "measured": 0.5422728999983519,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
@@ -777,7 +930,7 @@
   {
    "group": "Engineering",
    "name": "calibration objective evaluation",
-   "measured": 8.288140001241118,
+   "measured": 8.565019999514334,
    "threshold": 200.0,
    "ok": true,
    "unit": "ms",
@@ -811,7 +964,7 @@
    "note": "recorded vs replayed surface points"
   }
  ],
- "seconds": 28.573408899988863,
+ "seconds": 58.207142100000056,
  "python": "3.12.3",
  "numpy": "2.5.2"
 }

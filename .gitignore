@@ -5,3 +5,8 @@ captures/frames*/
 .gstack/
 captures/test_*.log
 captures/healthcheck.log
+
+# regenerable run outputs (Session G); real recordings under captures/real/SPY and history_*.json ARE tracked
+captures/real/report/
+captures/real/synthetic/
+captures/pytest_*.log

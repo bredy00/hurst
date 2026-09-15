@@ -1,0 +1,74 @@
+name: ci
+
+# quick tier on every push and pull request; full tier + health checks weekly and on demand
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * 1"          # Mondays 05:17 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quick:
+    name: pytest (quick tier)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: install
+        run: pip install -r requirements.txt
+      - name: pytest -m "not slow"
+        run: pytest -m "not slow" -q
+
+  full:
+    name: pytest (full) + health checks
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: install
+        run: pip install -r requirements.txt
+      - name: restore health-check history (trend over n CI runs)
+        uses: actions/cache/restore@v4
+        with:
+          path: captures/healthcheck_history.jsonl
+          key: health-history-${{ github.run_id }}
+          restore-keys: health-history-
+      - name: pytest (everything)
+        run: pytest -q
+      - name: health checks with trend
+        run: |
+          set -o pipefail
+          python healthcheck.py --md --trend | tee captures/healthcheck_ci.md
+      - name: save health-check history
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: captures/healthcheck_history.jsonl
+          key: health-history-${{ github.run_id }}
+      - name: upload health report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: health-report
+          path: |
+            captures/healthcheck.json
+            captures/healthcheck_ci.md
+            captures/healthcheck_history.jsonl
