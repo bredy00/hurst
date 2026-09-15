@@ -409,6 +409,14 @@ this model; fed real realised variance, the spot model would have reported H ≈
 - **GitHub Actions** runs the quick tier on every push and the full tier plus health
   checks weekly and on demand. The health-check history is carried across CI runs in the
   Actions cache, so the n-run trend rules work in CI too.
+- **Verified on GitHub's Linux runners.** Quick tier: 64 items and 438 checks green in 63
+  seconds. Full tier: 83 items and 563 checks in 7 min 25 s, and health checks 107 of 107.
+  That first full run also exposed a flaw in my trend rule: it compared the runner with
+  this laptop's history and flagged three spurious drifts. Two were exact numbers that
+  differ across platforms in the 16th digit, which the laptop's zero spread turned into
+  z = 5.7 and z = 2.4 million; the third was a faster startup. Trends are now compared
+  within one machine class (GitHub runners share one), with a spread floor of 1e-6 of the
+  value; replayed on CI's own history file, nothing flags.
 - **The backup** is a private GitHub repository under bredy00, named `hurst` — the
   quantity everything here converges on. The IBKR recordings it will hold are licensed
   market data, so it is private until you decide otherwise.

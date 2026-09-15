@@ -608,7 +608,11 @@ checked to 6.6e-16) with RV's own sampling noise: **0.061 +/- 0.027**.
 ### Engineering
 **563 checks in 83 pytest items, all green** (11 min). All suites under pytest via `conftest.py` (a test fails if any of its checks failed;
 the per-suite check counts print at the end), quick / full tiers, GitHub Actions with
-the health-check history carried across runs in the Actions cache. Health checks
+the health-check history carried across runs in the Actions cache. Verified on Linux
+runners: quick 438 checks in 63 s; full 563 checks in 7.4 min plus 107 health checks.
+Trend drift is compared within a machine class (all GitHub runners share one), with a
+spread floor of 1e-6 of the value -- the first CI run flagged cross-platform rounding
+(z = 2.4e6 on a zero-spread laptop history) before that. Health checks
 107 of 107; trend rules for the review's targets (rough objective rolling mean <= 0.75 s
 on the same host, recursive-MLE deviation max < 2 SE over 20 runs, kernel error < 0.01).
 

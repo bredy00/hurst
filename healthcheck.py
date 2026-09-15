@@ -991,11 +991,22 @@ def _git_sha():
         return None
 
 
+def machine_key():
+    """
+    The machine class a run belongs to. GitHub-hosted runners get a new hostname
+    every run, so they share one key; anything else is its hostname.
+    """
+    import os
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        return "github-actions:" + platform.system()
+    return platform.node()
+
+
 def append_history(seconds):
-    """One line per run: timestamp, git sha, and every numeric measurement."""
+    """One line per run: timestamp, git sha, machine, and every numeric measurement."""
     import datetime
     row = {"ts": datetime.datetime.now().isoformat(timespec="seconds"),
-           "sha": _git_sha(), "seconds": round(seconds, 1), "host": platform.node(),
+           "sha": _git_sha(), "seconds": round(seconds, 1), "host": machine_key(),
            "n_ok": sum(1 for r in RESULTS if r["ok"]), "n": len(RESULTS),
            "measured": {r["name"]: r["measured"] for r in RESULTS
                         if isinstance(r["measured"], (int, float, np.integer, np.floating))
@@ -1014,27 +1025,40 @@ def load_history(last=None):
 
 def trend_report(rows=None):
     """
-    Per check over the recorded runs: n, mean, std, last, and a drift z-score
-    (last vs the mean and std of the EARLIER runs). Tracking the variance of
-    the measurements rather than only their mean is what makes systemic drift
-    visible before a threshold trips. Flags: |z| > 3, plus the TREND_RULES.
+    Per check over the recorded runs ON THIS MACHINE CLASS: n, mean, std, last,
+    and a drift z-score (last vs the mean and std of the earlier runs). Tracking
+    the variance of the measurements rather than only their mean is what makes
+    systemic drift visible before a threshold trips. Flags: |z| > 3, plus the
+    TREND_RULES.
+
+    Two things the first CI run showed (Session G): a Linux runner compared
+    against a laptop's history flagged a faster startup as drift, and two exact
+    numbers that differ across platforms in the 16th digit came out at z = 5.7
+    and z = 2.4e6, because their laptop history had zero spread. So runs are
+    compared only within a machine class (rows from before hosts were recorded
+    count as this laptop's), and the spread has a floor of 1e-6 of the value.
     """
     rows = load_history() if rows is None else rows
     if not rows:
         return []
+    here = machine_key()
+    legacy = "github-actions" not in here             # pre-host rows came from the laptop
+    rows = [r for r in rows if r.get("host", here if legacy else None) == here]
+    if not rows:
+        return []
     names = sorted({k for r in rows for k in r["measured"]})
     out = []
-    here = platform.node()
     for name in names:
         rule = TREND_RULES.get(name, {})
-        use = [r for r in rows if name in r["measured"]
-               and (not rule.get("same_host") or r.get("host", here) == here)]
+        use = [r for r in rows if name in r["measured"]]
         v = np.array([r["measured"][name] for r in use], dtype=float)
         if v.size == 0:
             continue
         mean, std, last = float(v.mean()), float(v.std(ddof=1)) if v.size > 1 else 0.0, float(v[-1])
-        if v.size > 2 and np.std(v[:-1]) > 0:
-            z = float((last - v[:-1].mean()) / np.std(v[:-1], ddof=1))
+        if v.size > 2:
+            prev = v[:-1]
+            spread = max(float(np.std(prev, ddof=1)), 1e-6 * abs(float(prev.mean())), 1e-300)
+            z = float((last - prev.mean()) / spread)
         else:
             z = 0.0
         flags = []
