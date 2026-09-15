@@ -1,0 +1,26 @@
+A  driver, shipped lift (N=24, 1e5): of the 30-day impact 6.1% lands in the first hour, 19.0% in the first day, 45.9% in the first week; V at 5 min / V at 1 day = 8.3; at 1 week 0.42, at 30 days 0.10 of the 1-day level
+A  driver, finer lift (N=40, 1e8): of the 30-day impact 6.3% lands in the first hour, 19.1% in the first day, 46.0% in the first week; V at 5 min / V at 1 day = 9.8; at 1 week 0.42, at 30 days 0.10 of the 1-day level
+A  direct, decay kappa = 3/y: of the 30-day impact 1.0% lands in the first hour, 6.0% in the first day, 26.3% in the first week; V at 5 min / V at 1 day = 1.1; at 1 week 0.80, at 30 days 0.33 of the 1-day level
+A  direct, decay 25/y (10-day e-fold): of the 30-day impact 2.9% lands in the first hour, 17.0% in the first day, 62.7% in the first week; V at 5 min / V at 1 day = 1.2; at 1 week 0.53, at 30 days -0.05 of the 1-day level
+A  Heston host (reference): of the 30-day impact 0.6% lands in the first hour, 3.9% in the first day, 19.2% in the first week; V at 5 min / V at 1 day = 1.0; at 1 week 0.95, at 30 days 0.71 of the 1-day level
+[A done in 4s]
+B  driver jump, shipped (N=24, 1e5), step 5 min: V moves 40.2 J at once; 1-day integrated impact 0.03305 J (exact continuous 0.03358 J)
+B  driver jump, shipped (N=24, 1e5), step 1 h: V moves 17.8 J at once; 1-day integrated impact 0.03178 J (exact continuous 0.03358 J)
+B  driver jump, shipped (N=24, 1e5), step 1/4 day: V moves 15.0 J at once; 1-day integrated impact 0.03346 J (exact continuous 0.03358 J)
+B  driver jump, finer (N=40, 1e8), step 5 min: V moves 47.4 J at once; 1-day integrated impact 0.03340 J (exact continuous 0.03358 J)
+B  driver jump, finer (N=40, 1e8), step 1 h: V moves 18.5 J at once; 1-day integrated impact 0.03213 J (exact continuous 0.03358 J)
+B  driver jump, finer (N=40, 1e8), step 1/4 day: V moves 15.4 J at once; 1-day integrated impact 0.03381 J (exact continuous 0.03358 J)
+B  direct jump: V moves 1.000 J at once at any step; 1-day impact 0.00370 J
+[B done in 0s]
+C  driver, shipped lift, n = 0.6: second spike larger on 0 of 21 (gap, window) pairs
+C  driver, shipped lift, n = 0.95: second spike larger on 14 of 21 (gap, window) pairs; gaps held: [0.5, 1.0, 2.0, 5.0, 10.0] days
+C  driver, finer lift, n = 0.6: second spike larger on 0 of 21 (gap, window) pairs
+C  driver, finer lift, n = 0.95: second spike larger on 14 of 21 (gap, window) pairs; gaps held: [0.5, 1.0, 2.0, 5.0, 10.0] days
+C  direct, decay 3/y, n = 0.6: second spike larger on 6 of 21 (gap, window) pairs; gaps held: [0.5, 1.0, 2.0] days
+C  direct, decay 3/y, n = 0.95: second spike larger on 19 of 21 (gap, window) pairs; gaps held: [0.5, 1.0, 2.0, 5.0, 10.0, 20.0] days
+C  direct, decay 25/y, n = 0.6: second spike larger on 5 of 21 (gap, window) pairs; gaps held: [0.5, 1.0, 2.0] days
+C  direct, decay 25/y, n = 0.95: second spike larger on 10 of 21 (gap, window) pairs; gaps held: [0.5, 1.0, 2.0, 5.0] days
+[C done in 5s]
+D  direct (25/y): the right decay shape wins on 4 of 12 three-year histories (events per history 10); pooled over 36 years: exponential (power p 0.84, exp rate 0.082/day); 27s
+D  driver (shipped lift): the right decay shape wins on 9 of 12 three-year histories (events per history 10); pooled over 36 years: power (power p 0.59, exp rate 0.052/day); 24s
+[D done in 51s]

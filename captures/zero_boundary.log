@@ -1,0 +1,21 @@
+near zero seed 61: kalman: kappa 2.96+/-0.41 (z -0.09), ll 2895.9, rmse 0.0099, 1.0s  fourier: kappa 2.46+/-0.48 (z -1.11), ll 3115.1, rmse 0.0089, 12.2s  particle: kappa 3.00+/-0.72 (z -0.00), ll 3117.2, rmse 0.0089, 17.8s
+near zero seed 63: kalman: kappa 4.13+/-0.34 (z +3.29), ll 3045.4, rmse 0.0091, 1.0s  fourier: kappa 2.22+/-0.43 (z -1.83), ll 3343.9, rmse 0.0081, 12.3s  particle: kappa 2.60+/-0.31 (z -1.29), ll 3339.6, rmse 0.0081, 15.3s
+near zero seed 65: kalman: kappa 3.35+/-0.51 (z +0.68), ll 2896.5, rmse 0.0095, 1.0s  fourier: kappa 2.40+/-0.50 (z -1.21), ll 3137.2, rmse 0.0085, 12.0s  particle: kappa 3.26+/-0.35 (z +0.74), ll 3141.3, rmse 0.0085, 20.2s
+near zero seed 67: kalman: kappa 2.79+/-0.47 (z -0.45), ll 2956.9, rmse 0.0094, 1.0s  fourier: kappa 2.12+/-0.45 (z -1.97), ll 3213.7, rmse 0.0083, 10.7s  particle: kappa 2.81+/-0.38 (z -0.48), ll 3214.9, rmse 0.0083, 24.2s
+near zero seed 69: kalman: kappa 4.34+/-0.53 (z +2.53), ll 2774.7, rmse 0.0095, 1.0s  fourier: kappa 2.88+/-0.56 (z -0.22), ll 3014.0, rmse 0.0086, 13.8s  particle: kappa 3.22+/-0.40 (z +0.55), ll 3018.4, rmse 0.0086, 19.6s
+near zero seed 71: kalman: kappa 4.77+/-0.66 (z +2.69), ll 2887.7, rmse 0.0094, 2.2s  fourier: kappa 4.09+/-0.62 (z +1.76), ll 3172.4, rmse 0.0085, 23.6s  particle: kappa 4.79+/-0.55 (z +3.24), ll 3170.4, rmse 0.0085, 55.2s
+away from zero seed 61: kalman: kappa 2.63+/-0.60 (z -0.61), ll 3828.3, rmse 0.0087, 1.2s  fourier: kappa 2.72+/-0.60 (z -0.46), ll 3829.2, rmse 0.0087, 12.5s  particle: kappa 2.84+/-0.42 (z -0.39), ll 3826.9, rmse 0.0087, 20.9s
+away from zero seed 63: kalman: kappa 2.98+/-0.59 (z -0.03), ll 3911.6, rmse 0.0081, 3.2s  fourier: kappa 2.93+/-0.57 (z -0.12), ll 3917.7, rmse 0.0081, 12.6s  particle: kappa 2.70+/-0.39 (z -0.77), ll 3916.0, rmse 0.0081, 26.6s
+away from zero seed 65: kalman: kappa 2.36+/-0.59 (z -1.10), ll 3858.1, rmse 0.0083, 1.2s  fourier: kappa 2.38+/-0.57 (z -1.08), ll 3860.9, rmse 0.0083, 11.1s  particle: kappa 2.38+/-0.49 (z -1.29), ll 3860.2, rmse 0.0083, 16.2s
+away from zero seed 67: kalman: kappa 2.47+/-0.60 (z -0.88), ll 3826.4, rmse 0.0083, 1.0s  fourier: kappa 2.58+/-0.59 (z -0.71), ll 3825.2, rmse 0.0083, 11.2s  particle: kappa 2.57+/-0.46 (z -0.95), ll 3823.8, rmse 0.0083, 21.6s
+
+near zero:
+   kalman    mean z +1.44, sd 1.59; mean kappa 3.72; loglik vs Kalman +0.0; rmse 0.00947; cost 1.2s per likelihood
+   fourier   mean z -0.76, sd 1.38; mean kappa 2.69; loglik vs Kalman +256.5; rmse 0.00849; cost 14.1s per likelihood
+   particle  mean z +0.46, sd 1.55; mean kappa 3.28; loglik vs Kalman +257.5; rmse 0.00849; cost 25.4s per likelihood
+
+away from zero:
+   kalman    mean z -0.66, sd 0.46; mean kappa 2.61; loglik vs Kalman +0.0; rmse 0.00837; cost 1.7s per likelihood
+   fourier   mean z -0.59, sd 0.41; mean kappa 2.66; loglik vs Kalman +2.1; rmse 0.00835; cost 11.8s per likelihood
+   particle  mean z -0.85, sd 0.37; mean kappa 2.62; loglik vs Kalman +0.6; rmse 0.00836; cost 21.3s per likelihood
+exit 0

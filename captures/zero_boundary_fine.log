@@ -1,0 +1,7 @@
+seed 61 (64-substep data; V exactly 0 on 7.9% of days, below 0.005 on 23.3%): kalman: kappa 2.94+/-0.45  fourier: kappa 2.39+/-0.52  particle_4: kappa 2.63+/-0.46  particle_16: kappa 2.55+/-0.30  (404s)
+seed 63 (64-substep data; V exactly 0 on 12.8% of days, below 0.005 on 29.7%): kalman: kappa 4.21+/-0.42  fourier: kappa 2.19+/-0.42  particle_4: kappa 2.90+/-0.29  particle_16: kappa 2.65+/-0.41  (433s)
+seed 65 (64-substep data; V exactly 0 on 7.7% of days, below 0.005 on 20.7%): kalman: kappa 3.81+/-0.52  fourier: kappa 2.82+/-0.56  particle_4: kappa 3.28+/-0.42  particle_16: kappa 2.60+/-0.23  (385s)
+   kalman       mean kappa 3.65; minus particle(16 substeps) per seed +0.39, +1.56, +1.22
+   fourier      mean kappa 2.47; minus particle(16 substeps) per seed -0.15, -0.46, +0.23
+   particle_4   mean kappa 2.94; minus particle(16 substeps) per seed +0.08, +0.25, +0.68
+   particle_16  mean kappa 2.60; minus particle(16 substeps) per seed +0.00, +0.00, +0.00
