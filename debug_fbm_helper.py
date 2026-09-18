@@ -84,17 +84,9 @@ def hybrid_kappa1(rng, n, a):
 
 
 def davies_harte(n, H, rng):
-    k = np.arange(0, n)
-    g = 0.5 * (np.abs(k + 1) ** (2 * H) - 2 * np.abs(k) ** (2 * H)
-               + np.abs(k - 1) ** (2 * H))
-    c = np.concatenate([g, [0.0], g[:0:-1]])
-    lam = np.fft.fft(c).real
-    if lam.min() < -1e-8 * max(abs(lam).max(), 1.0):
-        raise ValueError("embedding not positive definite")
-    lam = np.maximum(lam, 0.0)
-    m = len(c)
-    z = rng.normal(size=m) + 1j * rng.normal(size=m)
-    return np.cumsum(np.fft.fft(np.sqrt(lam / (2 * m)) * z).real[:n])
+    """Exact fBm: the project's shared generator (models/fbm.py, Session I)."""
+    from models.fbm import fbm
+    return fbm(n, H, rng)
 
 
 def rho1(path):

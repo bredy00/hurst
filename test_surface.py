@@ -14,6 +14,7 @@ import sys
 import numpy as np
 
 import volsurf_core as vc
+from models.fbm import fbm as _fbm     # exact fGn/fBm (Davies-Harte, Shevchenko eq. (5)); Session I
 import volatility_surface_3 as v3
 
 
@@ -247,38 +248,6 @@ def test_dual_hurst():
           abs(v3.hurst_agreement(0.12, 0.35)['gap'] - 0.23) < 1e-9)
 
 
-def _fbm(n, H, rng):
-    """
-    Exact fractional Brownian motion by Davies-Harte circulant embedding.
-
-    An approximate generator is worthless here: the whole point of the test is
-    that H comes back, so the planted H has to be exactly right. A cheap
-    convolution helper was tried first and returned the wrong exponent, which
-    would have looked like an estimator bug rather than a generator bug.
-    """
-    k = np.arange(0, n)
-    g = 0.5 * (np.abs(k + 1) ** (2 * H) - 2 * np.abs(k) ** (2 * H)
-               + np.abs(k - 1) ** (2 * H))
-    c = np.concatenate([g, [0.0], g[:0:-1]])
-    lam = np.fft.fft(c).real
-    # Shevchenko (2014) Sec 6: for fBm the circulant embedding is positive
-    # definite, so every eigenvalue is positive and the square root is real.
-    # That holds across our working range (min eigenvalue +2.8e-05 at H=0.10)
-    # but FAILS as H -> 1: at H = 0.99 the minimum is -0.76. Flooring at zero
-    # silently returns a path that is not fBm, so refuse instead.
-    if lam.min() < -1e-8 * max(abs(lam).max(), 1.0):
-        raise ValueError(
-            f"circulant embedding not positive definite at H={H} "
-            f"(min eigenvalue {lam.min():.3e}); Wood-Chan needs its "
-            f"approximate fallback here")
-    lam = np.maximum(lam, 0.0)
-    m = len(c)
-    z = rng.normal(size=m) + 1j * rng.normal(size=m)
-    fgn = np.fft.fft(np.sqrt(lam / (2 * m)) * z).real[:n]
-    return np.cumsum(fgn)
-
-
-# --- A5: replay -------------------------------------------------------------
 def test_replay():
     print("\nA5 -- record and replay")
     import tempfile

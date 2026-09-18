@@ -79,3 +79,14 @@ appears anywhere in the tests.
 - BLP optimal points and the cell mean give *identical* numbers above. That is
   expected — `b_j*` is defined so that `(b_j*)^a` equals the cell mean of `u^a` —
   and is a check that the two were coded consistently, not two independent fixes.
+
+## Session I note: the exact generator itself
+
+The "Davies–Harte, exact fBm" rows above came from the fixture copy of the time, which
+had two defects found in Session I against Shevchenko (2014, Sec. 6): a zero in the
+middle of the circulant row instead of ρ(n−1), which only matters from H ≈ 0.93, and a
+√2 scale slip that gave the noise variance 1/2. Neither changes a number in this note:
+at H = 0.12 that embedding was nonnegative, so the draws had exactly the right
+correlations, and Ĥ and ρ(1) do not depend on the scale. All exact fBm in the project now
+comes from `models/fbm.py`, tested in `test_fbm.py`; `docs/comparison-fbm-methods.pdf`
+has the full comparison.
