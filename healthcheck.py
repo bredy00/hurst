@@ -517,8 +517,21 @@ def h_lift():
         worst = max(worst, float(np.max(np.abs(a - b))))
     record("Markovian lift", "ETDRK4 vs implicit trapezoidal + Richardson (H=0.12)", worst,
            5e-6, worst < 5e-6, note="independent time-steppers, 1 d / 30 d / 1 y")
+
+
+def h_timing():
+    """
+    Timing first, on a cool machine (Session I). Measured at the end of the lift section,
+    after two minutes of heavy checks, the objective read 0.77 s with the CPU reference at
+    0.375 s; on the same machine a moment earlier, cool, 0.49 s and 0.278 s. Sustained load
+    throttles this laptop, so the timing checks run before anything else heats it, and the
+    reference still guards the trend (THROTTLE).
+    """
+    import models.rough_heston as rh
+    Pr = rh.RoughHestonParams(0.04, 2.0, 0.045, 0.5, -0.7, 0.12)
+    rh.call_prices(np.linspace(-0.1, 0.1, 13), 30 / 365, Pr)      # imports and caches, not timed
     runs = []
-    for _ in range(3):            # best of three: a laptop under load or throttling reads 0.85-1.05 s
+    for _ in range(3):            # best of three
         t0 = time.perf_counter()
         for d_ in (1, 2, 3, 7, 14, 30, 60, 90, 180, 365):
             tau = d_ / 365
@@ -1018,7 +1031,7 @@ def h_replay():
            note="recorded vs replayed surface points")
 
 
-CHECKS = [h_normal, h_black_scholes, h_finite_difference, h_char_func,
+CHECKS = [h_timing, h_normal, h_black_scholes, h_finite_difference, h_char_func,
           h_branch_cut, h_bs_degeneracy, h_pricers, h_monte_carlo, h_density,
           h_hurst, h_forward, h_svi, h_arbitrage, h_calibration,
           h_fractional_kernel, h_lift, h_rough_robustness, h_identifiability_rough,
@@ -1127,11 +1140,26 @@ def machine_key():
     return platform.node()
 
 
+LEGACY_CONFIG = "lift 24:1e+05"         # every row written before configurations were recorded
+
+
+def config_key():
+    """
+    The model configuration a run measures. A deliberate change of it -- Session I made the
+    40-node lift the default -- shifts deterministic measurements once, and the trend's
+    spread floor turns such a shift into z-scores in the thousands (20 series flagged on the
+    first run after the change). Trends therefore compare runs within one configuration,
+    as they compare runs within one machine class.
+    """
+    import models.rough_heston as rh
+    return f"lift {rh.N_DEFAULT}:{rh.ETA_N_DEFAULT:.0e}"
+
+
 def append_history(seconds):
     """One line per run: timestamp, git sha, machine, and every numeric measurement."""
     import datetime
     row = {"ts": datetime.datetime.now().isoformat(timespec="seconds"),
-           "sha": _git_sha(), "seconds": round(seconds, 1), "host": machine_key(),
+           "sha": _git_sha(), "seconds": round(seconds, 1), "host": machine_key(), "config": config_key(),
            "n_ok": sum(1 for r in RESULTS if r["ok"]), "n": len(RESULTS),
            "measured": {r["name"]: r["measured"] for r in RESULTS
                         if isinstance(r["measured"], (int, float, np.integer, np.floating))
@@ -1161,7 +1189,8 @@ def trend_report(rows=None):
     numbers that differ across platforms in the 16th digit came out at z = 5.7
     and z = 2.4e6, because their laptop history had zero spread. So runs are
     compared only within a machine class (rows from before hosts were recorded
-    count as this laptop's), and the spread has a floor of 1e-6 of the value.
+    count as this laptop's), and the spread has a floor of 1e-6 of the value. Since
+    Session I also only within one model configuration (config_key).
     """
     rows = load_history() if rows is None else rows
     if not rows:
@@ -1169,6 +1198,8 @@ def trend_report(rows=None):
     here = machine_key()
     legacy = "github-actions" not in here             # pre-host rows came from the laptop
     rows = [r for r in rows if r.get("host", here if legacy else None) == here]
+    cfg = config_key()
+    rows = [r for r in rows if r.get("config", LEGACY_CONFIG) == cfg]
     if not rows:
         return []
     names = sorted({k for r in rows for k in r["measured"]})
@@ -1206,7 +1237,8 @@ def trend_report(rows=None):
 def print_trend():
     rows = load_history()
     rep = trend_report(rows)
-    print(f"\nTrend over {len(rows)} recorded run(s)")
+    print(f"\nTrend over {len(rows)} recorded run(s); compared within this machine and configuration "
+          f"({machine_key()}, {config_key()})")
     print("-" * 74)
     print(f"  {'check':46} {'n':>3} {'mean':>10} {'std':>10} {'last':>10}  flags")
     for r in rep:

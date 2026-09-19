@@ -1,13 +1,34 @@
 {
  "results": [
   {
+   "group": "Engineering",
+   "name": "CPU reference workload",
+   "measured": 0.23824810000951402,
+   "threshold": Infinity,
+   "ok": true,
+   "unit": "s",
+   "note": "best of 3; 1.00x this machine's median over 1 earlier runs",
+   "trend": true
+  },
+  {
+   "group": "Markovian lift",
+   "name": "rough objective evaluation, 10 expiries x 13 strikes",
+   "measured": 0.460292899995693,
+   "threshold": 3.0,
+   "ok": true,
+   "unit": "s",
+   "note": "best of 3 (all: 0.46, 0.46, 0.46); trend target: rolling mean <= 0.75 s",
+   "trend": true
+  },
+  {
    "group": "Foundations",
    "name": "norm_pdf vs scipy",
    "measured": 0.0,
    "threshold": 1e-15,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Foundations",
@@ -16,7 +37,8 @@
    "threshold": 1e-15,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Foundations",
@@ -25,7 +47,8 @@
    "threshold": 1e-09,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Foundations",
@@ -34,7 +57,8 @@
    "threshold": 0.0001,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Foundations",
@@ -43,7 +67,8 @@
    "threshold": 1e-06,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Foundations",
@@ -52,7 +77,8 @@
    "threshold": 1e-12,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Foundations",
@@ -61,7 +87,8 @@
    "threshold": 1.0,
    "ok": true,
    "unit": "x floor",
-   "note": "2.08e-11 measured, floor 5.06e-11"
+   "note": "2.08e-11 measured, floor 5.06e-11",
+   "trend": true
   },
   {
    "group": "Foundations",
@@ -70,7 +97,8 @@
    "threshold": 2.0,
    "ok": true,
    "unit": "",
-   "note": "Fornberg 5-point; mapped-coordinate idea measured at 0.01"
+   "note": "Fornberg 5-point; mapped-coordinate idea measured at 0.01",
+   "trend": true
   },
   {
    "group": "Foundations",
@@ -79,7 +107,8 @@
    "threshold": 1.5,
    "ok": true,
    "unit": "",
-   "note": "the documented first-order loss"
+   "note": "the documented first-order loss",
+   "trend": true
   },
   {
    "group": "Heston cf",
@@ -88,7 +117,8 @@
    "threshold": 1e-12,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Heston cf",
@@ -97,7 +127,8 @@
    "threshold": 1e-10,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Heston cf",
@@ -106,7 +137,8 @@
    "threshold": 1e-12,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Heston cf",
@@ -115,7 +147,8 @@
    "threshold": 1.0,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Heston cf",
@@ -124,7 +157,8 @@
    "threshold": 50.0,
    "ok": true,
    "unit": "",
-   "note": "Albrecher g=(a-d)/(a+d)"
+   "note": "Albrecher g=(a-d)/(a+d)",
+   "trend": true
   },
   {
    "group": "Heston cf",
@@ -133,7 +167,8 @@
    "threshold": 500.0,
    "ok": true,
    "unit": "",
-   "note": "the trap, kept to prove it is real"
+   "note": "the trap, kept to prove it is real",
+   "trend": true
   },
   {
    "group": "Heston cf",
@@ -142,7 +177,8 @@
    "threshold": 100.0,
    "ok": true,
    "unit": "x",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Heston cf",
@@ -151,7 +187,8 @@
    "threshold": 1e-14,
    "ok": true,
    "unit": "",
-   "note": "at xi=1e-8, cancellation-free form; was 5.9e-09 at xi=1e-4"
+   "note": "at xi=1e-8, cancellation-free form; was 5.9e-09 at xi=1e-4",
+   "trend": true
   },
   {
    "group": "Heston cf",
@@ -160,7 +197,8 @@
    "threshold": 1e-06,
    "ok": true,
    "unit": "",
-   "note": "shipped form is 5.7e-13 at the same xi"
+   "note": "shipped form is 5.7e-13 at the same xi",
+   "trend": true
   },
   {
    "group": "Pricers",
@@ -169,7 +207,8 @@
    "threshold": 1e-10,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Pricers",
@@ -178,7 +217,8 @@
    "threshold": 1e-10,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Pricers",
@@ -187,7 +227,8 @@
    "threshold": 1e-08,
    "ok": true,
    "unit": "",
-   "note": "independent routes, 5 maturities"
+   "note": "independent routes, 5 maturities",
+   "trend": true
   },
   {
    "group": "Pricers",
@@ -196,7 +237,8 @@
    "threshold": 1e-08,
    "ok": true,
    "unit": "",
-   "note": "alpha 0.75 to 3.0"
+   "note": "alpha 0.75 to 3.0",
+   "trend": true
   },
   {
    "group": "Pricers",
@@ -205,7 +247,8 @@
    "threshold": 5.0,
    "ok": true,
    "unit": "sd",
-   "note": "residual is Euler O(dt) bias"
+   "note": "residual is Euler O(dt) bias",
+   "trend": true
   },
   {
    "group": "Pricers",
@@ -214,7 +257,8 @@
    "threshold": 0.0006119468161619278,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Pricers",
@@ -223,7 +267,8 @@
    "threshold": 1.0,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Pricers",
@@ -232,7 +277,8 @@
    "threshold": 1.0,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Pricers",
@@ -241,7 +287,8 @@
    "threshold": -1e-07,
    "ok": true,
    "unit": "",
-   "note": "tail dither scales as 1/dK^2"
+   "note": "tail dither scales as 1/dK^2",
+   "trend": true
   },
   {
    "group": "Pricers",
@@ -250,7 +297,8 @@
    "threshold": 1e-12,
    "ok": true,
    "unit": "",
-   "note": "floored 622 pts, removed -5.1e-10 of mass"
+   "note": "floored 622 pts, removed -5.1e-10 of mass",
+   "trend": true
   },
   {
    "group": "Estimators",
@@ -259,25 +307,28 @@
    "threshold": 0.12,
    "ok": true,
    "unit": "",
-   "note": "r2 = 1.00000"
+   "note": "r2 = 1.00000",
+   "trend": true
   },
   {
    "group": "Estimators",
    "name": "H from structure function, worst of 4 planted",
-   "measured": 0.006199501007736252,
+   "measured": 0.006199501007736419,
    "threshold": 0.03,
    "ok": true,
    "unit": "",
-   "note": "H = 0.10, 0.12, 0.30, 0.50"
+   "note": "H = 0.10, 0.12, 0.30, 0.50",
+   "trend": true
   },
   {
    "group": "Estimators",
    "name": "two independent H routes agree",
-   "measured": 0.0028910500986608773,
+   "measured": 0.002891050145111651,
    "threshold": 0.05,
    "ok": true,
    "unit": "",
-   "note": "surface route vs path route"
+   "note": "surface route vs path route",
+   "trend": true
   },
   {
    "group": "Estimators",
@@ -286,7 +337,8 @@
    "threshold": 1e-06,
    "ok": true,
    "unit": "",
-   "note": "r2 = 1.000000, no rate or dividend input"
+   "note": "r2 = 1.000000, no rate or dividend input",
+   "trend": true
   },
   {
    "group": "Estimators",
@@ -295,7 +347,8 @@
    "threshold": 1e-09,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Estimators",
@@ -304,7 +357,8 @@
    "threshold": 0.001,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Estimators",
@@ -313,7 +367,8 @@
    "threshold": 1,
    "ok": true,
    "unit": "",
-   "note": "g_min over data = 0.2297"
+   "note": "g_min over data = 0.2297",
+   "trend": true
   },
   {
    "group": "Estimators",
@@ -322,7 +377,8 @@
    "threshold": 0,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Estimators",
@@ -331,7 +387,8 @@
    "threshold": 1,
    "ok": true,
    "unit": "",
-   "note": "flags the dent's neighbours"
+   "note": "flags the dent's neighbours",
+   "trend": true
   },
   {
    "group": "Estimators",
@@ -340,7 +397,8 @@
    "threshold": 0,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Estimators",
@@ -349,7 +407,8 @@
    "threshold": 1,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Calibration",
@@ -358,7 +417,8 @@
    "threshold": 0.01,
    "ok": true,
    "unit": "rel",
-   "note": "7 iters, 0.6s"
+   "note": "7 iters, 0.6s",
+   "trend": true
   },
   {
    "group": "Calibration",
@@ -367,7 +427,8 @@
    "threshold": 0.001,
    "ok": true,
    "unit": "vol pts",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Calibration",
@@ -376,7 +437,8 @@
    "threshold": 100000000.0,
    "ok": true,
    "unit": "",
-   "note": "high = parameters trade off; see identifiability"
+   "note": "high = parameters trade off; see identifiability",
+   "trend": true
   },
   {
    "group": "Calibration",
@@ -385,7 +447,8 @@
    "threshold": 10.0,
    "ok": true,
    "unit": "%",
-   "note": "stable"
+   "note": "stable",
+   "trend": true
   },
   {
    "group": "Calibration",
@@ -394,7 +457,8 @@
    "threshold": 50.0,
    "ok": true,
    "unit": "%",
-   "note": "unidentified"
+   "note": "unidentified",
+   "trend": true
   },
   {
    "group": "Calibration",
@@ -403,7 +467,8 @@
    "threshold": 50.0,
    "ok": true,
    "unit": "%",
-   "note": "stable"
+   "note": "stable",
+   "trend": true
   },
   {
    "group": "Calibration",
@@ -412,7 +477,8 @@
    "threshold": 50.0,
    "ok": true,
    "unit": "%",
-   "note": "loose"
+   "note": "loose",
+   "trend": true
   },
   {
    "group": "Calibration",
@@ -421,7 +487,8 @@
    "threshold": 10.0,
    "ok": true,
    "unit": "%",
-   "note": "stable"
+   "note": "stable",
+   "trend": true
   },
   {
    "group": "Calibration",
@@ -430,7 +497,8 @@
    "threshold": 10.0,
    "ok": true,
    "unit": "%",
-   "note": "prior from a history or a variance swap"
+   "note": "prior from a history or a variance swap",
+   "trend": true
   },
   {
    "group": "Markovian lift",
@@ -439,79 +507,98 @@
    "threshold": 1e-08,
    "ok": true,
    "unit": "rel",
-   "note": "mu(dx) = x^-a / (Gamma(a)Gamma(1-a)) dx, a = H+1/2"
+   "note": "mu(dx) = x^-a / (Gamma(a)Gamma(1-a)) dx, a = H+1/2",
+   "trend": true
   },
   {
    "group": "Markovian lift",
-   "name": "kernel error, N=24, t in [1 day, 2 y]",
-   "measured": 0.008696581705958375,
+   "name": "kernel error of the default lift, t in [1 day, 2 y]",
+   "measured": 0.007027444451805628,
    "threshold": 0.01,
    "ok": true,
    "unit": "rel",
-   "note": "max relative; H = 0.12"
+   "note": "max relative; H = 0.12; N = 40, top node 1e+08/y",
+   "trend": true
   },
   {
    "group": "Markovian lift",
    "name": "kernel error on [1 hour, 2 y]",
-   "measured": 0.008696581705958375,
+   "measured": 0.007027444451805628,
    "threshold": 0.01,
    "ok": true,
    "unit": "rel",
-   "note": "a one-day option lives here; 12% below 5 minutes"
+   "note": "a one-day option lives here",
+   "trend": true
   },
   {
    "group": "Markovian lift",
-   "name": "kernel error, N=24, worst over H in [0.08, 0.5]",
-   "measured": 0.009719760152666174,
+   "name": "kernel error on [5 minutes, 2 y]",
+   "measured": 0.007027444451805628,
    "threshold": 0.01,
    "ok": true,
    "unit": "rel",
-   "note": "H = 0.05: 0.0105, H = 0.02: 0.0113 -- above 1%"
+   "note": "the shipped N = 24 lift was 12% off here (Sessions D-H)",
+   "trend": true
   },
   {
    "group": "Markovian lift",
-   "name": "kernel error, N=32, worst over the whole H box [0.02, 0.5]",
-   "measured": 0.006655967055248549,
+   "name": "kernel error of the default lift, worst over H in [0.02, 0.5], [1 day, 2 y]",
+   "measured": 0.009075135888329708,
    "threshold": 0.01,
    "ok": true,
    "unit": "rel",
-   "note": "what calibration refits with when a fit lands below H = 0.08"
+   "note": "the calibration box; no refinement needed (Session I)",
+   "trend": true
+  },
+  {
+   "group": "Markovian lift",
+   "name": "kernel error of the default lift, worst over H in [0.02, 0.5], [1 hour, 2 y]",
+   "measured": 0.009075135888329708,
+   "threshold": 0.01,
+   "ok": true,
+   "unit": "rel",
+   "note": "the calibration box; no refinement needed (Session I)",
+   "trend": true
   },
   {
    "group": "Markovian lift",
    "name": "Laplace-domain error, z in [0.1, 100] (plan: 1%, see note)",
-   "measured": 0.03507577343510438,
+   "measured": 0.03349048271999506,
    "threshold": 0.05,
    "ok": true,
    "unit": "rel",
-   "note": "3.5% is the memory beyond 2 y; 1% is not reachable with a 2 y fit"
+   "note": "3.5% is the memory beyond 2 y; 1% is not reachable with a 2 y fit",
+   "trend": true
   },
   {
    "group": "Markovian lift",
    "name": "Laplace-domain error on the pricing band z in [1, 100]",
-   "measured": 0.014185702305392463,
+   "measured": 0.00635391635476612,
    "threshold": 0.03,
    "ok": true,
    "unit": "rel",
-   "note": "a year down to a few days"
+   "note": "a year down to a few days",
+   "trend": true
   },
   {
    "group": "Markovian lift",
    "name": "lifted recursion == SOE convolution (identity)",
-   "measured": 4.0523140398818214e-14,
+   "measured": 3.3861802251067274e-14,
    "threshold": 1e-12,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Markovian lift",
    "name": "lifted path vs true-kernel Volterra path (L2, same noise)",
-   "measured": 0.008001259501771076,
+   "measured": 0.006333291532370264,
    "threshold": 0.01,
    "ok": true,
    "unit": "rel",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Markovian lift",
@@ -520,43 +607,38 @@
    "threshold": 1e-09,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Markovian lift",
    "name": "full N-node lift at H = 0.4999 vs Heston",
-   "measured": 1.6415039865606023e-05,
+   "measured": 1.646723106177037e-05,
    "threshold": 0.0001,
    "ok": true,
    "unit": "",
-   "note": "shrinks 10x per decade of (1/2 - H)"
+   "note": "shrinks 10x per decade of (1/2 - H)",
+   "trend": true
   },
   {
    "group": "Markovian lift",
    "name": "ETDRK4 vs implicit trapezoidal + Richardson (H=0.12)",
-   "measured": 3.7941004989427995e-06,
+   "measured": 4.123329530705096e-06,
    "threshold": 5e-06,
    "ok": true,
    "unit": "",
-   "note": "independent time-steppers, 1 d / 30 d / 1 y"
-  },
-  {
-   "group": "Markovian lift",
-   "name": "rough objective evaluation, 10 expiries x 13 strikes",
-   "measured": 1.06498739999995,
-   "threshold": 3.0,
-   "ok": true,
-   "unit": "s",
-   "note": "best of 3 (all: 1.10, 1.06, 1.07); trend target: rolling mean <= 0.75 s"
+   "note": "independent time-steppers, 1 d / 30 d / 1 y",
+   "trend": true
   },
   {
    "group": "Rough robustness",
    "name": "exptrap at 120 steps, u to 1200, guards off (NOT unconditionally stable)",
-   "measured": 1.2104066067592526e+36,
+   "measured": 1.081892311019349e+36,
    "threshold": 1.0,
    "ok": true,
    "unit": "",
-   "note": "|phi(u - i/2)| must be <= 1; kept to prove the constraint"
+   "note": "|phi(u - i/2)| must be <= 1; kept to prove the constraint",
+   "trend": true
   },
   {
    "group": "Rough robustness",
@@ -565,16 +647,18 @@
    "threshold": 1.0,
    "ok": true,
    "unit": "",
-   "note": "hard precondition since Session G; |phi| <= 1 is a hard postcondition"
+   "note": "hard precondition since Session G; |phi| <= 1 is a hard postcondition",
+   "trend": true
   },
   {
    "group": "Rough robustness",
    "name": "stability-sized exptrap, same u range: max |phi(u - i/2)|",
-   "measured": 0.9987515190070971,
+   "measured": 0.9987514915451536,
    "threshold": 1.0,
    "ok": true,
    "unit": "",
-   "note": "383 steps"
+   "note": "383 steps",
+   "trend": true
   },
   {
    "group": "Rough robustness",
@@ -583,43 +667,48 @@
    "threshold": 4,
    "ok": true,
    "unit": "",
-   "note": "Carr-Madan returned 1.9e18 / 2.9e28 at 30 / 90 d here"
+   "note": "Carr-Madan returned 1.9e18 / 2.9e28 at 30 / 90 d here",
+   "trend": true
   },
   {
    "group": "Rough robustness",
    "name": "unpriceable quote: minimum charge (vol) vs 0 before",
-   "measured": 4.754324270165518,
-   "threshold": 4.754324269165518,
+   "measured": 4.754298448963064,
+   "threshold": 4.754298447963064,
    "ok": true,
    "unit": "",
-   "note": "exact fit costs 1.4e-22"
+   "note": "exact fit costs 1.6e-22",
+   "trend": true
   },
   {
    "group": "Rough identifiability",
    "name": "SE(H), 20 quotes, equal weights, 0.5 vp noise",
-   "measured": 0.04711444807209752,
+   "measured": 0.04652378797972937,
    "threshold": 0.06,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Rough identifiability",
    "name": "SE(H), same quotes, vega^2 weights",
-   "measured": 0.20238488488963058,
+   "measured": 0.196660295030389,
    "threshold": 0.15,
    "ok": true,
    "unit": "",
-   "note": "H not identified: the weights discard the short end"
+   "note": "H not identified: the weights discard the short end",
+   "trend": true
   },
   {
    "group": "Rough identifiability",
    "name": "corr(H, xi) at the truth",
-   "measured": 0.9775844056955758,
+   "measured": 0.9776948237070606,
    "threshold": 0.9,
    "ok": true,
    "unit": "",
-   "note": "the rough analogue of kappa/theta"
+   "note": "the rough analogue of kappa/theta",
+   "trend": true
   },
   {
    "group": "Hawkes",
@@ -628,7 +717,8 @@
    "threshold": 3.0,
    "ok": true,
    "unit": "SE",
-   "note": "12.457 vs 12.5"
+   "note": "12.457 vs 12.5",
+   "trend": true
   },
   {
    "group": "Hawkes",
@@ -637,7 +727,8 @@
    "threshold": 0.15,
    "ok": true,
    "unit": "",
-   "note": "Fano 5.93"
+   "note": "Fano 5.93",
+   "trend": true
   },
   {
    "group": "Hawkes",
@@ -646,7 +737,8 @@
    "threshold": 3.0,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Hawkes",
@@ -655,7 +747,8 @@
    "threshold": 0.01,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Hawkes",
@@ -664,16 +757,28 @@
    "threshold": 1e-06,
    "ok": true,
    "unit": "",
-   "note": "clustering is detected, not assumed"
+   "note": "clustering is detected, not assumed",
+   "trend": true
   },
   {
    "group": "Hawkes",
-   "name": "second spike: superposition identity, 4 hosts",
+   "name": "second spike: superposition identity, every host",
    "measured": 8.881784197001252e-16,
    "threshold": 1e-12,
    "ok": true,
    "unit": "",
-   "note": "inc2 - inc1 = r(d+W) - r(d)"
+   "note": "inc2 - inc1 = r(d+W) - r(d); OU, Heston, rough (the direct rough mode was retired in Session I)",
+   "trend": true
+  },
+  {
+   "group": "Hawkes",
+   "name": "rough jump: realised 1-day impact / its parameter, 5-minute steps",
+   "measured": 0.005225081586375135,
+   "threshold": 0.05,
+   "ok": true,
+   "unit": "",
+   "note": "ratio 0.9948; the parameter is the average extra variance over the first day",
+   "trend": true
   },
   {
    "group": "Hawkes",
@@ -682,7 +787,8 @@
    "threshold": 0.0,
    "ok": true,
    "unit": "",
-   "note": "at 0.97 kappa: -2.1e-06"
+   "note": "at 0.97 kappa: -2.1e-06",
+   "trend": true
   },
   {
    "group": "Hawkes",
@@ -691,7 +797,8 @@
    "threshold": 0,
    "ok": true,
    "unit": "",
-   "note": "14 of 21 at n = 0.95 -- needs near-critical clustering"
+   "note": "14 of 21 at n = 0.95 -- needs near-critical clustering",
+   "trend": true
   },
   {
    "group": "Hawkes",
@@ -700,7 +807,8 @@
    "threshold": 4.0,
    "ok": true,
    "unit": "SE",
-   "note": "5.73 vs 5.59; ratio to Poisson = daily Fano"
+   "note": "5.73 vs 5.59; ratio to Poisson = daily Fano",
+   "trend": true
   },
   {
    "group": "Kalman",
@@ -709,7 +817,8 @@
    "threshold": 1e-12,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Kalman",
@@ -718,7 +827,8 @@
    "threshold": 2.0,
    "ok": true,
    "unit": "pts",
-   "note": "45.6% vs 45.2%"
+   "note": "45.6% vs 45.2%",
+   "trend": true
   },
   {
    "group": "Kalman",
@@ -727,7 +837,8 @@
    "threshold": 2.0,
    "ok": true,
    "unit": "x",
-   "note": "attenuation bias; MLE through the filter is unbiased"
+   "note": "attenuation bias; MLE through the filter is unbiased",
+   "trend": true
   },
   {
    "group": "Kalman",
@@ -736,7 +847,8 @@
    "threshold": 1.0,
    "ok": true,
    "unit": "%",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Kalman",
@@ -745,7 +857,8 @@
    "threshold": 1.0,
    "ok": true,
    "unit": "SE",
-   "note": "Wan-Nelson dual: 0.07 SE"
+   "note": "Wan-Nelson dual: 0.07 SE",
+   "trend": true
   },
   {
    "group": "Kalman",
@@ -754,7 +867,8 @@
    "threshold": 2.0,
    "ok": true,
    "unit": "",
-   "note": "bad-print excursion 2.0x normal error"
+   "note": "bad-print excursion 2.0x normal error",
+   "trend": true
   },
   {
    "group": "Kalman",
@@ -763,7 +877,8 @@
    "threshold": 6.044214182665649,
    "ok": true,
    "unit": "x",
-   "note": "re-converges in 0 steps"
+   "note": "re-converges in 0 steps",
+   "trend": true
   },
   {
    "group": "Kalman",
@@ -772,16 +887,18 @@
    "threshold": 2.0,
    "ok": true,
    "unit": "",
-   "note": "excursion 1.7x vs strict 2.0x"
+   "note": "excursion 1.7x vs strict 2.0x",
+   "trend": true
   },
   {
    "group": "Kalman",
    "name": "lifted rough filter: RMSE improvement over quotes",
-   "measured": 39.66544509985898,
+   "measured": 37.67046959617373,
    "threshold": 30.0,
    "ok": true,
    "unit": "%",
-   "note": "24 lifted factors as the state, rank-one Q"
+   "note": "the lifted factors (40 on the default lift) as the state, rank-one Q",
+   "trend": true
   },
   {
    "group": "Recording (real data)",
@@ -790,7 +907,8 @@
    "threshold": 30.0,
    "ok": true,
    "unit": "h",
-   "note": "a naive local clock gave 27 h (fixed in Session G)"
+   "note": "a naive local clock gave 27 h (fixed in Session G)",
+   "trend": true
   },
   {
    "group": "Recording (real data)",
@@ -799,7 +917,8 @@
    "threshold": 1.0,
    "ok": true,
    "unit": "",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Recording (real data)",
@@ -808,61 +927,68 @@
    "threshold": 1.0,
    "ok": true,
    "unit": "x",
-   "note": "IBKR sends vega per vol point"
+   "note": "IBKR sends vega per vol point",
+   "trend": true
   },
   {
    "group": "Positivity (Session G)",
    "name": "QE step: mean vs exact conditional mean, in SE",
-   "measured": 0.02983322098176512,
+   "measured": 0.009151178762910968,
    "threshold": 4.0,
    "ok": true,
    "unit": "SE",
-   "note": "variance -0.27% vs exact; min V 2.7e-11"
+   "note": "variance -0.29% vs exact; min V 2.9e-11",
+   "trend": true
   },
   {
    "group": "Positivity (Session G)",
    "name": "quadrature of the integrated-variance moments",
-   "measured": 1.0714903730129076e-15,
+   "measured": 1.1064827830938275e-15,
    "threshold": 1e-12,
    "ok": true,
    "unit": "rel",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Positivity (Session G)",
    "name": "rough variance simulated 3000 days: minimum",
-   "measured": -2.0816681711721685e-17,
+   "measured": -1.3877787807814457e-17,
    "threshold": -1e-12,
    "ok": true,
    "unit": "",
-   "note": "Euler at the same parameters: below zero on 13% of days"
+   "note": "Euler at the same parameters: below zero on 13% of days",
+   "trend": true
   },
   {
    "group": "Positivity (Session G)",
    "name": "exact-moment filter: QML kappa bias away from zero, mean z",
-   "measured": 0.6432528014763671,
+   "measured": 1.0559678533311032,
    "threshold": 2.0,
    "ok": true,
    "unit": "SE",
-   "note": "near zero a Gaussian quasi-likelihood is unreliable (open flag)"
+   "note": "near zero a Gaussian quasi-likelihood is unreliable (open flag)",
+   "trend": true
   },
   {
    "group": "Lift fidelity (Session G)",
-   "name": "7-day IV, lift N=24 vs true rough Heston (fractional Adams)",
-   "measured": 0.06339609919561173,
-   "threshold": 0.1,
+   "name": "7-day IV, default lift vs true rough Heston (fractional Adams)",
+   "measured": 0.029606976534823914,
+   "threshold": 0.05,
    "ok": true,
    "unit": "vp",
-   "note": "1 day: 0.15 vp, skew -1.6% (study_lewis_isometry.py)"
+   "note": "N = 24 was 0.063 at 7 d, 0.148 at 1 d; N = 40 0.030 and 0.034 (study_finer_lift.py)",
+   "trend": true
   },
   {
    "group": "Lift fidelity (Session G)",
    "name": "Ito isometry of the lift at 1 day, shortfall vs true kernel",
-   "measured": 21.597044708988346,
-   "threshold": 25.0,
+   "measured": 5.057985583436874,
+   "threshold": 8.0,
    "ok": true,
    "unit": "%",
-   "note": "93% of it from lags under 7 minutes; prices integrate it away"
+   "note": "21.6% on the N = 24 lift (its top node cut the kernel below 7 minutes); 5.1% now",
+   "trend": true
   },
   {
    "group": "H weighting (Session G)",
@@ -871,7 +997,8 @@
    "threshold": 0.25,
    "ok": true,
    "unit": "x",
-   "note": "0.0749 -> 0.0076"
+   "note": "0.0749 -> 0.0076",
+   "trend": true
   },
   {
    "group": "H weighting (Session G)",
@@ -880,7 +1007,8 @@
    "threshold": 0.08654395866168575,
    "ok": true,
    "unit": "",
-   "note": "inverse variance 0.087, vega^2 0.098"
+   "note": "inverse variance 0.087, vega^2 0.098",
+   "trend": true
   },
   {
    "group": "H weighting (Session G)",
@@ -889,61 +1017,68 @@
    "threshold": 0.9,
    "ok": true,
    "unit": "",
-   "note": "structural: re-weighting cannot remove it"
+   "note": "structural: re-weighting cannot remove it",
+   "trend": true
   },
   {
    "group": "Learning H (Session G)",
    "name": "filter profile likelihood: |H_hat - 0.12| in SE",
-   "measured": 1.0509003382638875,
+   "measured": 0.4697619598222427,
    "threshold": 3.0,
    "ok": true,
    "unit": "SE",
-   "note": "H_hat 0.133 +/- 0.012, xi re-fitted at each H"
+   "note": "H_hat 0.125 +/- 0.010, xi re-fitted at each H",
+   "trend": true
   },
   {
    "group": "Learning H (Session G)",
    "name": "log-likelihood of H = 0.49 against the best H",
-   "measured": -266.0317475827019,
+   "measured": -329.6965331278557,
    "threshold": -20.0,
    "ok": true,
    "unit": "",
-   "note": "Heston-like roughness rejected with xi free"
+   "note": "Heston-like roughness rejected with xi free",
+   "trend": true
   },
   {
    "group": "Zero boundary (Session H)",
    "name": "variance cf (Riccati) vs exact affine mean and variance, 1 day",
-   "measured": 1.7828692633337084e-08,
+   "measured": 5.034281365112747e-07,
    "threshold": 1e-06,
    "ok": true,
    "unit": "rel",
-   "note": "two derivations: the CF filter's Riccati and the eigen-coordinate moments"
+   "note": "two derivations: the CF filter's Riccati and the eigen-coordinate moments",
+   "trend": true
   },
   {
    "group": "Zero boundary (Session H)",
    "name": "away from zero, 400 days: both filters' log-likelihood vs Kalman",
-   "measured": 1.020928045859364,
+   "measured": 1.9098969620146136,
    "threshold": 3.0,
    "ok": true,
    "unit": "nats",
-   "note": "CF -0.34, particle -1.02: nothing to gain where the Gaussian is right"
+   "note": "CF +1.91, particle +0.91: nothing to gain where the Gaussian is right",
+   "trend": true
   },
   {
    "group": "Zero boundary (Session H)",
    "name": "near zero (V = 0 on 14% of days): particle log-likelihood gain over Kalman",
-   "measured": 58.25148908374115,
+   "measured": 68.40291974642003,
    "threshold": 20.0,
    "ok": true,
    "unit": "nats",
-   "note": "400 days; 257 nats per 1500 days over 6 seeds (study_zero_boundary.py)"
+   "note": "400 days; 257 nats per 1500 days over 6 seeds (study_zero_boundary.py)",
+   "trend": true
   },
   {
    "group": "Zero boundary (Session H)",
    "name": "near zero: CF filter vs particle filter log-likelihood",
-   "measured": 0.3773027556815123,
+   "measured": 1.1736184013517459,
    "threshold": 6.0,
    "ok": true,
    "unit": "nats",
-   "note": "they agree on the likelihood; the cf filter's low kappa on 4-substep data was a mismatch with the data's law, not the filter (study_zero_boundary_fine.py)"
+   "note": "they agree on the likelihood; the cf filter's low kappa on 4-substep data was a mismatch with the data's law, not the filter (study_zero_boundary_fine.py)",
+   "trend": true
   },
   {
    "group": "Trading clock (Session H)",
@@ -952,7 +1087,18 @@
    "threshold": 1e-12,
    "ok": true,
    "unit": "rel",
-   "note": ""
+   "note": "",
+   "trend": true
+  },
+  {
+   "group": "Trading clock (Session H)",
+   "name": "2025 reference split: session / overnight / weekend-holiday hours",
+   "measured": 0.0,
+   "threshold": 1e-09,
+   "ok": true,
+   "unit": "h",
+   "note": "1622.5 / 3412.5 / 3725 h (sum 8760 = 365 x 24); by rule: the one-off closure of 9 Jan 2025 is not modelled",
+   "trend": true
   },
   {
    "group": "Trading clock (Session H)",
@@ -961,7 +1107,8 @@
    "threshold": 0,
    "ok": true,
    "unit": "",
-   "note": "days in one list only"
+   "note": "days in one list only",
+   "trend": true
   },
   {
    "group": "Trading clock (Session H)",
@@ -970,7 +1117,8 @@
    "threshold": 89.5,
    "ok": true,
    "unit": "h",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Trading clock (Session H)",
@@ -979,7 +1127,8 @@
    "threshold": 0.0001,
    "ok": true,
    "unit": "rel",
-   "note": ""
+   "note": "",
+   "trend": true
   },
   {
    "group": "Trading clock (Session H)",
@@ -988,7 +1137,8 @@
    "threshold": 0.85,
    "ok": true,
    "unit": "",
-   "note": "profile GLS with an F(1, dof) cut"
+   "note": "profile GLS with an F(1, dof) cut",
+   "trend": true
   },
   {
    "group": "Trading clock (Session H)",
@@ -997,7 +1147,8 @@
    "threshold": 0.001,
    "ok": true,
    "unit": "s",
-   "note": "snapshots before Session H stored local time with no offset"
+   "note": "snapshots before Session H stored local time with no offset",
+   "trend": true
   },
   {
    "group": "Engineering",
@@ -1006,25 +1157,28 @@
    "threshold": 0,
    "ok": true,
    "unit": "",
-   "note": "scipy.stats alone costs 5.8 s"
+   "note": "scipy.stats alone costs 5.8 s",
+   "trend": true
   },
   {
    "group": "Engineering",
    "name": "startup to actionable error, no TWS",
-   "measured": 0.6875670000000582,
+   "measured": 0.5570989999978337,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
-   "note": "was 9.6 s before lazy imports"
+   "note": "was 9.6 s before lazy imports",
+   "trend": true
   },
   {
    "group": "Engineering",
    "name": "calibration objective evaluation",
-   "measured": 16.445679999992535,
+   "measured": 8.896979998098686,
    "threshold": 200.0,
    "ok": true,
    "unit": "ms",
-   "note": "39 quotes; 470 ms before vectorising"
+   "note": "39 quotes; 470 ms before vectorising",
+   "trend": true
   },
   {
    "group": "Engineering",
@@ -1033,7 +1187,8 @@
    "threshold": 1,
    "ok": true,
    "unit": "",
-   "note": "2 reuses; leggauss is O(n^2)"
+   "note": "2 reuses; leggauss is O(n^2)",
+   "trend": true
   },
   {
    "group": "Engineering",
@@ -1042,7 +1197,8 @@
    "threshold": 1e-12,
    "ok": true,
    "unit": "",
-   "note": "calibration runs at 1e-12, ~2x faster"
+   "note": "calibration runs at 1e-12, ~2x faster",
+   "trend": true
   },
   {
    "group": "Engineering",
@@ -1051,10 +1207,11 @@
    "threshold": 1e-12,
    "ok": true,
    "unit": "",
-   "note": "recorded vs replayed surface points"
+   "note": "recorded vs replayed surface points",
+   "trend": true
   }
  ],
- "seconds": 85.64171220000003,
+ "seconds": 125.01098689998616,
  "python": "3.12.3",
  "numpy": "2.5.2"
 }
