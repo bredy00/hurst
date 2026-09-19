@@ -939,8 +939,10 @@ def _draw_frame(fig, ax, app, ctxs, max_age, z_grid, log_vol_series, state):
         ax_rough.set_title("ATM skew term structure: needs 3+ expiries")
     ax_rough.set_xlabel("τ (days)")
     ax_rough.set_ylabel("|∂σ/∂k|")
-    # Default log minor labels collide over a narrow decade range
+    # Default log minor labels collide over a narrow decade range; 1-2-3-5 steps label it
+    from matplotlib.ticker import LogLocator
     for axis in (ax_rough.xaxis, ax_rough.yaxis):
+        axis.set_major_locator(LogLocator(base=10.0, subs=(1.0, 2.0, 3.0, 5.0)))
         axis.set_major_formatter(ScalarFormatter())
         axis.set_minor_formatter(NullFormatter())
 

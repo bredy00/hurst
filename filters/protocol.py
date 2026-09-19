@@ -29,9 +29,13 @@ everywhere away from zero, where it is cheap and adequate.
        of all the filters; the cf filter 1351.2 (0.43 nats a day short of converged), the
        Kalman filter 729.8. So when the cf and 16-substep filters disagree, the particle
        filter is rerun at 4x the substeps (one seed) and the verdict is taken against
-       that: "confirmed at 64 substeps" or "not confirmed". A hard boundary like that one
-       comes out "not confirmed": the cf filter's gamma posterior is the better estimate
-       on offer, but it carries a measured approximation cost there.
+       that, one of three: "confirmed at 64 substeps"; "not confirmed: the particle filter
+       has not converged", when the cf filter sits above it at both resolutions and the gap
+       closes as the substeps grow (the pipeline's synthetic history: +4.70 nats a day at
+       16, +0.53 at 64); or "not confirmed" with the gap, when the cf filter trails the
+       64-substep particle filter -- a hard boundary like the one above, where the cf
+       filter's gamma posterior is the better estimate on offer but carries a measured
+       approximation cost.
 
 All three filters use the same observation model: y = I / dt + N(0, R + 2/M y^2), realised
 variance's sampling error at the observed RV (Barndorff-Nielsen & Shephard's feasible
@@ -159,8 +163,18 @@ def run(p, y, dt=1.0 / 252, H=0.12, v0=0.04, bars_per_day=78, confirm=True, n_pa
             "cf_minus_particle": gap, "cf_minus_particle_per_day": gap / T,
             "particle16_minus_particle": float(ll_pf.mean() - r["loglik"]),
             "median_rel_rv_diff_boundary_days": float(np.median(rel4))}
-        out["confirmation"]["verdict"] = (f"confirmed at {4 * substeps} substeps (the {substeps}-substep particle "
-                                          "filter under-resolves this boundary)" if ok4 else "not confirmed")
+        if ok4:
+            verdict = (f"confirmed at {4 * substeps} substeps (the {substeps}-substep particle filter "
+                       "under-resolves this boundary)")
+        elif 0.0 < gap < ll_gap:
+            # the particle filter's likelihood rises with its substeps toward the cf filter's
+            verdict = (f"not confirmed: the particle filter has not converged (the cf filter is "
+                       f"{ll_gap / T:+.3f} nats a day above it at {substeps} substeps, {gap / T:+.3f} at "
+                       f"{4 * substeps}, the gap closing)")
+        else:
+            verdict = (f"not confirmed: the cf filter is {gap / T:+.3f} nats a day from the "
+                       f"{4 * substeps}-substep particle filter")
+        out["confirmation"]["verdict"] = verdict
         out["confirmation"]["confirmed"] = ok4
     if verbose:
         c = out["confirmation"]

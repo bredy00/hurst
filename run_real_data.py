@@ -306,8 +306,9 @@ def plot(report, S, fits, path):
         a.set_xlabel("τ (days)")
         a.set_ylabel("−∂σ/∂k")
         a.set_title("(b) ATM skew term structure")
-        from matplotlib.ticker import NullFormatter, ScalarFormatter
+        from matplotlib.ticker import LogLocator, NullFormatter, ScalarFormatter
         for axis in (a.xaxis, a.yaxis):
+            axis.set_major_locator(LogLocator(base=10.0, subs=(1.0, 2.0, 3.0, 5.0)))
             axis.set_major_formatter(ScalarFormatter())
             axis.set_minor_formatter(NullFormatter())
         a.legend(loc="upper right")
@@ -476,7 +477,9 @@ def markdown(r):
     if hs:
         rp = hs["rough_profile"]
         lines += ["## History", "", f"- {hs['n_days']} days of {hs['source']}, mean vol {hs['mean_vol']:.3f}",
-                  f"- CIR MLE kappa {hs['cir']['params']['kappa']:.2f} (se {hs['cir']['se']['kappa']:.2f})",
+                  f"- CIR MLE kappa {hs['cir']['params']['kappa']:.2f} "
+                  + (f"(se {hs['cir']['se']['kappa']:.2f})" if np.isfinite(hs['cir']['se']['kappa'])
+                     else "(se not available: the numerical Hessian at the optimum gives none)"),
                   f"- lifted rough filter: H profile maximum {rp['H_hat']:.3f} (se {rp['se']:.3f}, 95% {rp['ci95'][0]:.3f}-{rp['ci95'][1]:.3f}); "
                   f"bank posterior {rp['bank_mean']:.3f} +/- {rp['bank_sd']:.3f}; log-likelihood over CIR {rp['loglik_vs_cir']:+.1f}",
                   f"- structure function of log RV: H {hs['H_structure']} (r2 {hs['H_structure_r2']})"]
