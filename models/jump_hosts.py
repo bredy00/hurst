@@ -126,39 +126,74 @@ class HestonHost:
         return m + self.kappa * (self.theta - m) * dt + expected_jump
 
 
+def mittag_leffler(z, a, b, tol=1e-16, max_terms=400):
+    """E_{a,b}(z) = sum_k z^k / Gamma(a k + b), by its series (|z| up to ~5 in double precision)."""
+    if abs(z) > 5.0:
+        raise ValueError(f"series Mittag-Leffler used at |z| = {abs(z):.2f} > 5: cancellation")
+    total, k = 0.0, 0
+    while k < max_terms:
+        term = z ** k / math.gamma(a * k + b)
+        total += term
+        if k > 4 and abs(term) < tol * max(abs(total), 1e-300):
+            break
+        k += 1
+    return total
+
+
+def driver_impact_integral(t, H, kappa):
+    """
+    int_0^t of the exact continuous response of V to a unit driver impulse:
+    t^alpha E_{alpha,alpha+1}(-kappa t^alpha), alpha = H + 1/2 (the resolvent of the
+    rough Heston mean reversion; the lift and the grid approximate it).
+    """
+    a = H + 0.5
+    return t ** a * mittag_leffler(-kappa * t ** a, a, a + 1.0)
+
+
 class RoughHost:
     """
-    Lifted rough Heston variance with Hawkes jumps, in one of two ways.
+    Lifted rough Heston variance with Hawkes jumps through the Volterra DRIVER: a jump
+    enters like the drift and the diffusion do, so its effect on V is J K(t - s) with the
+    mean reversion's resolvent -- a power law. Each factor steps with its exact
+    propagator e^{-x_i dt} and takes the step's driver increment through the cell mean
+    phi_1(-x_i dt), the discretisation Session D chose because it keeps the kernel's
+    short-lag weight.
 
-    jump_mode="driver" (default): the jump enters the Volterra driver like the
-        drift and the diffusion, so its effect on V is J K(t - s) -- a power
-        law. Each factor steps with its exact propagator e^{-x_i dt} and takes
-        the step's driver increment through the cell mean phi_1(-x_i dt), the
-        discretisation Session D chose because it keeps the kernel's short-lag
-        weight.
-    jump_mode="direct": the rough diffusion is unchanged and jumps go into a
-        separate component D added to V, decaying at `jump_decay` (default
-        kappa): V = v0 + w'U + D. Mean reversion in the factors still reacts to
-        the raised V.
+    A JUMP'S SIZE IS ITS INTEGRATED VARIANCE IMPACT (Session I). In the exact rough model
+    the kernel is infinite at zero, so a driver jump has no instantaneous size in V; on a
+    lift the instantaneous move is finite but depends on the grid and the lift (40.2 per
+    unit driver at 5-minute steps on the Sessions A-H lift, 17.8 at 1-hour steps), while
+    the one-day integrated impact moves by at most 5.4% (docs/comparison-jump-modes.md,
+    section 2). So JumpSizes.state_mean is read here as the jump's AVERAGE EXTRA VARIANCE
+    over the first `impact_horizon` (default one trading day), and converted to a driver
+    increment through the exact continuous response:
 
-    The state is a matrix (N + 1, n_paths): the N factors, then D (identically
-    zero in driver mode). The quantity measured is V. Which mode is right is a
-    modelling decision, not a numerical one, and the second-spike property
-    depends on it -- see the module docstring.
+        driver increment = impact * horizon / int_0^horizon r(t) dt,
+        int_0^t r = t^alpha E_{alpha,alpha+1}(-kappa t^alpha)        (driver_impact_integral)
+
+    so the parameter means the same thing on every grid and every lift. The realised
+    one-day impact is within 4.3% of it on the default lift at 5-minute to quarter-day
+    steps, and within 5.4% on the Sessions A-H lift; the worst case on both is 1-hour
+    steps (test_hawkes.py).
+
+    Until Session I a second mode, "direct", added a separately decaying component D to
+    V. It was dropped: while D is high the mean reversion pushes the rough factors down,
+    and they remember that through the kernel after D has gone, so V undershoots its
+    no-jump path (after ~20 days at a 25/y decay). study_jump_modes.py keeps a private
+    copy of it so the Session H comparison stays reproducible.
+
+    The state is the (N, n_paths) matrix of lifted factors. The quantity measured is V.
     """
 
-    def __init__(self, kappa=3.0, theta=0.04, xi=0.3, H=0.12, v0=0.04, N=None,
-                 jump_mode="driver", jump_decay=None):
+    def __init__(self, kappa=3.0, theta=0.04, xi=0.3, H=0.12, v0=0.04, N=None, impact_horizon=1.0 / 252):
         import models.rough_heston as rh
-        if jump_mode not in ("driver", "direct"):
-            raise ValueError(f"jump_mode must be 'driver' or 'direct', got {jump_mode!r}")
         self.kappa, self.theta, self.xi, self.H, self.v0 = map(float, (kappa, theta, xi, H, v0))
         self.N = rh.N_DEFAULT if N is None else int(N)
         self.w, self.x = rh.lift_nodes(self.H, self.N)
         self._phi1 = rh._phi1
-        self.jump_mode = jump_mode
-        self.jump_decay = self.kappa if jump_decay is None else float(jump_decay)
-        self.name = f"rough Heston (variance, {jump_mode} jumps)"
+        self.impact_horizon = float(impact_horizon)
+        self.driver_per_impact = self.impact_horizon / driver_impact_integral(self.impact_horizon, self.H, self.kappa)
+        self.name = "rough Heston (variance, driver jumps)"
 
     def _coef(self, dt):
         return np.exp(-self.x * dt), self._phi1(-self.x * dt)
@@ -167,21 +202,15 @@ class RoughHost:
         """State with E[state] a fixed point of the mean recursion under a constant rate."""
         E, g = self._coef(dt)
         n = len(self.w)
-        if self.jump_mode == "driver":
-            A = np.eye(n) - np.diag(E) + self.kappa * dt * np.outer(g, self.w)
-            b = g * (self.kappa * dt * (self.theta - self.v0) + jump_mean * rate * dt)
-            return np.concatenate([np.linalg.solve(A, b), [0.0]])
-        ed = math.exp(-self.jump_decay * dt)
-        D = jump_mean * rate * dt / (1.0 - ed)
         A = np.eye(n) - np.diag(E) + self.kappa * dt * np.outer(g, self.w)
-        b = g * (self.kappa * dt * (self.theta - self.v0 - D))
-        return np.concatenate([np.linalg.solve(A, b), [D]])
+        b = g * (self.kappa * dt * (self.theta - self.v0) + jump_mean * self.driver_per_impact * rate * dt)
+        return np.linalg.solve(A, b)
 
     def init(self, n_paths, state0):
         return np.repeat(np.asarray(state0, dtype=float)[:, None], n_paths, axis=1)
 
     def _V(self, S):
-        return self.v0 + self.w @ S[:-1] + S[-1]
+        return self.v0 + self.w @ S
 
     def variance(self, S):
         return np.maximum(self._V(S), 0.0)
@@ -192,28 +221,15 @@ class RoughHost:
     def step(self, S, dt, z_v, jump_sum):
         E, g = self._coef(dt)
         Vp = np.maximum(self._V(S), 0.0)
-        drive = self.kappa * (self.theta - Vp) * dt + self.xi * np.sqrt(Vp * dt) * z_v
-        out = np.empty_like(S)
-        if self.jump_mode == "driver":
-            drive = drive + jump_sum
-            out[-1] = 0.0
-        else:
-            out[-1] = S[-1] * math.exp(-self.jump_decay * dt) + jump_sum
-        out[:-1] = E[:, None] * S[:-1] + g[:, None] * drive[None, :]
-        return out
+        drive = (self.kappa * (self.theta - Vp) * dt + self.xi * np.sqrt(Vp * dt) * z_v
+                 + jump_sum * self.driver_per_impact)
+        return E[:, None] * S + g[:, None] * drive[None, :]
 
     def mean_step(self, M, dt, expected_jump):
         E, g = self._coef(dt)
-        V = self.v0 + self.w @ M[:-1] + M[-1]
-        drive = self.kappa * (self.theta - V) * dt
-        out = np.empty_like(M)
-        if self.jump_mode == "driver":
-            drive = drive + expected_jump
-            out[-1] = 0.0
-        else:
-            out[-1] = M[-1] * math.exp(-self.jump_decay * dt) + expected_jump
-        out[:-1] = E * M[:-1] + g * drive
-        return out
+        V = self.v0 + self.w @ M
+        drive = self.kappa * (self.theta - V) * dt + expected_jump * self.driver_per_impact
+        return E * M + g * drive
 
 
 class ConstantHost:

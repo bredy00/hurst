@@ -29,6 +29,7 @@ import matplotlib.pyplot as plt
 
 import models.hawkes as hk
 import models.jump_hosts as jh
+from study_jump_modes import DirectJumpHost, DriverIncrementHost   # the Session F semantics (Session I)
 import filters.kalman as kf
 
 OUT = pathlib.Path(__file__).parent / "captures"
@@ -86,9 +87,9 @@ def main():
          jh.JumpSizes(state_mean=0.01), H, C["heston"], "-"),
         ("OU log-variance (Hawkes) — identical once normalised", jh.OUHost(kappa=3.0, theta=math.log(0.04), sigma=1.0),
          jh.JumpSizes(state_mean=0.05), H, C["ou"], "--"),
-        ("rough, driver jumps (Hawkes)", jh.RoughHost(jump_mode="driver"),
+        ("rough, driver jumps (Hawkes)", DriverIncrementHost(),
          jh.JumpSizes(state_mean=0.002), H, C["rough_d"], "-"),
-        ("rough, direct jumps (Hawkes)", jh.RoughHost(jump_mode="direct"),
+        ("rough, direct jumps (Hawkes)", DirectJumpHost(),
          jh.JumpSizes(state_mean=0.01), H, C["rough_x"], "-"),
         ("Heston variance (Poisson)", jh.HestonHost(kappa=3.0, theta=0.04, xi=0.3),
          jh.JumpSizes(state_mean=0.01), P, C["poisson"], "--"),
@@ -110,8 +111,8 @@ def main():
     for label, host, J0 in (("constant\n(Merton)", jh.ConstantHost(0.04), jh.JumpSizes()),
                             ("OU", jh.OUHost(kappa=3.0, theta=math.log(0.04), sigma=1.0), jh.JumpSizes(state_mean=0.05)),
                             ("Heston", jh.HestonHost(kappa=3.0, theta=0.04, xi=0.3), jh.JumpSizes(state_mean=0.01)),
-                            ("rough\n(driver)", jh.RoughHost(jump_mode="driver"), jh.JumpSizes(state_mean=0.002)),
-                            ("rough\n(direct)", jh.RoughHost(jump_mode="direct"), jh.JumpSizes(state_mean=0.01))):
+                            ("rough\n(driver)", DriverIncrementHost(), jh.JumpSizes(state_mean=0.002)),
+                            ("rough\n(direct)", DirectJumpHost(), jh.JumpSizes(state_mean=0.01))):
         J = jh.JumpSizes(state_mean=J0.state_mean, price_std=s)
         vals = {}
         for name, proc in (("h", H), ("p", P)):

@@ -10,6 +10,8 @@ where r is the single-shock mean response, so the second spike is larger iff r
 is still rising across the window. Poisson makes that impossible on every host;
 Hawkes delivers it on the exponential hosts iff alpha > kappa at short gaps; on
 rough Heston with jumps in the Volterra driver it needs near-critical clustering.
+Since Session I the driver is the rough host's only jump mode, and a jump's size is
+its integrated variance impact (test_rough_jump_size).
 Monte Carlo is used to check the simulator against the exact expectations, not
 to establish the property.
 
@@ -46,10 +48,9 @@ def hosts():
     return [
         (jh.OUHost(kappa=3.0, theta=math.log(0.04), sigma=1.0), jh.JumpSizes(state_mean=0.05)),
         (jh.HestonHost(kappa=3.0, theta=0.04, xi=0.3), jh.JumpSizes(state_mean=0.01)),
-        (jh.RoughHost(kappa=3.0, theta=0.04, xi=0.3, H=0.12, v0=0.04, jump_mode="driver"),
-         jh.JumpSizes(state_mean=0.002)),
-        (jh.RoughHost(kappa=3.0, theta=0.04, xi=0.3, H=0.12, v0=0.04, jump_mode="direct"),
-         jh.JumpSizes(state_mean=0.01)),
+        # driver jumps sized by integrated impact (Session I): 0.017 extra variance on
+        # average over the first day, the Sessions F-H driver increment of 0.002
+        (jh.RoughHost(kappa=3.0, theta=0.04, xi=0.3, H=0.12, v0=0.04), jh.JumpSizes(state_mean=0.017)),
     ]
 
 
@@ -184,7 +185,7 @@ def test_second_spike_exact():
         check(f"{host.name}, Poisson: yet the LEVEL after the second shock is higher (not a test)",
               a["level2"] > a["level1"], f"level {a['level1']:.4f} -> {a['level2']:.4f}")
 
-    ou, heston, rough_driver, rough_direct = hosts()
+    ou, heston, rough_driver = hosts()
     for host, J in (ou, heston):
         a = jh.second_spike(host, H, J, DT, 8, 4)
         b = jh.second_spike(host, H, J, DT, 40, 8)
@@ -209,10 +210,45 @@ def test_second_spike_exact():
     held_c = sum(1 for d, w in grid if (lambda a: a["inc2"] > a["inc1"])(jh.second_spike(host, critical, J, DT, d, w)))
     check("...but it appears near criticality (n = 0.95, same mean rate)",
           held_c > len(grid) // 3, f"{held_c} of {len(grid)} pairs")
-    host, J = rough_direct
-    a = jh.second_spike(host, H, J, DT, 4, 2)
-    check("rough Heston, jumps added directly to V: property holds at a 1-day gap",
-          a["inc2"] > a["inc1"], f"{a['inc1']:.5f} -> {a['inc2']:.5f}")
+
+
+def test_rough_jump_size():
+    """Session I: one rough jump mode (driver), sized by its integrated variance impact."""
+    print("\nI -- rough jumps: driver only, sized by integrated variance impact")
+    try:
+        jh.RoughHost(jump_mode="direct")
+        refused = False
+    except TypeError:
+        refused = True
+    check("the direct mode is gone: RoughHost takes no jump_mode", refused)
+    import models.rough_heston as rh
+    impact = 0.02
+    quiet = hk.HawkesParams.poisson(1e-9)
+    rows, worst = {}, {}
+    for lift in ((40, 1e8), (24, 1e5)):
+        rows[lift], worst[lift] = [], 0.0
+        with rh.using_lift(*lift):
+            host = jh.RoughHost(kappa=3.0, theta=0.04, xi=0.3, H=0.12, v0=0.04)
+            for label, bars in (("5 min", 78), ("1 h", 6.5), ("1/4 day", 4)):
+                dt = DAY / bars
+                k1d = int(round(bars))
+                n = 2 + k1d + 1
+                r = jh.shock_response(host, quiet, jh.JumpSizes(state_mean=impact), n * dt, n, 2)[3:]
+                got = float(np.sum(r[:k1d]) * dt / DAY)          # average extra variance over the day
+                worst[lift] = max(worst[lift], abs(got / impact - 1.0))
+                rows[lift].append(f"{label} {got / impact - 1:+.1%}")
+    # the grid's cell-mean discretisation of the driver, worst at 1-hour steps
+    check("default lift: the realised one-day impact matches the parameter within 5% at 5-minute, "
+          "1-hour and quarter-day steps", worst[(40, 1e8)] < 0.05, "; ".join(rows[(40, 1e8)]))
+    check("...and within 6% on the Sessions A-H lift (24 nodes to 1e5/y)", worst[(24, 1e5)] < 0.06,
+          "; ".join(rows[(24, 1e5)]))
+    host = jh.RoughHost(kappa=3.0, theta=0.04, xi=0.3, H=0.12, v0=0.04)
+    exact = jh.driver_impact_integral(DAY, 0.12, 3.0)
+    a = 0.62
+    series = sum((-3.0) ** k * DAY ** (a * (k + 1)) / math.gamma(a * k + a + 1.0) for k in range(4))
+    check("the conversion uses the exact response integral t^a E_{a,a+1}(-kappa t^a) "
+          "(four series terms agree to 1e-4)", abs(exact / series - 1.0) < 1e-4,
+          f"{exact:.6f} vs {series:.6f}; driver increment per unit impact {host.driver_per_impact:.5f}")
 
 
 def test_second_spike_monte_carlo():
@@ -280,6 +316,7 @@ if __name__ == "__main__":
     test_intensity_peaks()
     test_likelihood()
     test_second_spike_exact()
+    test_rough_jump_size()
     test_second_spike_monte_carlo()
     test_kurtosis()
     print("\n" + "=" * 74)

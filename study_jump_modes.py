@@ -16,6 +16,11 @@ Rough jump modes: jumps through the Volterra driver, or added directly to V?
      runs on the recorded SPY history.
 
     python study_jump_modes.py        (~10 minutes) -> captures/jump_modes.json, .log
+
+Session I adopted driver mode, sized by integrated impact, and retired direct mode from
+the model. The two classes below keep the Session H semantics so this brief reproduces:
+DriverIncrementHost reads jump sizes as raw driver increments, DirectJumpHost is the
+retired mode, and the "shipped" rows run on the Sessions A-H lift (24 nodes to 1e5/y).
 """
 
 import json
@@ -35,6 +40,63 @@ KW = dict(kappa=3.0, theta=0.04, xi=0.3, H=0.12, v0=0.04)
 BARS = 78
 DAY = 1.0 / 252
 QUIET = hk.HawkesParams.poisson(1e-9)          # a single planted event, nothing else arriving
+SHIPPED = (24, 1e5)                             # the Sessions A-H lift, the "shipped" rows below
+
+
+class DriverIncrementHost(jh.RoughHost):
+    """
+    Sessions F-H driver jumps: JumpSizes.state_mean is the raw driver increment J.
+    Since Session I the model reads a rough jump's size as its integrated variance
+    impact (models.jump_hosts.RoughHost); this class keeps the old reading so the
+    comparison here reproduces its "per unit J" numbers. Not part of the model.
+    """
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.driver_per_impact = 1.0
+        self.jump_mode = "driver"
+
+
+class DirectJumpHost(jh.RoughHost):
+    """
+    The Sessions F-H "direct" mode, retired in Session I: a component D added to V,
+    decaying at `jump_decay` (default kappa); the state is (N + 1, n), D last. Kept
+    only so this comparison reproduces. Not part of the model.
+    """
+
+    def __init__(self, jump_decay=None, **kw):
+        super().__init__(**kw)
+        self.jump_mode = "direct"
+        self.jump_decay = self.kappa if jump_decay is None else float(jump_decay)
+        self.name = "rough Heston (variance, direct jumps)"
+
+    def stationary_state(self, jump_mean, rate, dt):
+        E, g = self._coef(dt)
+        n = len(self.w)
+        D = jump_mean * rate * dt / (1.0 - math.exp(-self.jump_decay * dt))
+        A = np.eye(n) - np.diag(E) + self.kappa * dt * np.outer(g, self.w)
+        b = g * (self.kappa * dt * (self.theta - self.v0 - D))
+        return np.concatenate([np.linalg.solve(A, b), [D]])
+
+    def _V(self, S):
+        return self.v0 + self.w @ S[:-1] + S[-1]
+
+    def step(self, S, dt, z_v, jump_sum):
+        E, g = self._coef(dt)
+        Vp = np.maximum(self._V(S), 0.0)
+        drive = self.kappa * (self.theta - Vp) * dt + self.xi * np.sqrt(Vp * dt) * z_v
+        out = np.empty_like(S)
+        out[-1] = S[-1] * math.exp(-self.jump_decay * dt) + jump_sum
+        out[:-1] = E[:, None] * S[:-1] + g[:, None] * drive[None, :]
+        return out
+
+    def mean_step(self, M, dt, expected_jump):
+        E, g = self._coef(dt)
+        V = self.v0 + self.w @ M[:-1] + M[-1]
+        out = np.empty_like(M)
+        out[-1] = M[-1] * math.exp(-self.jump_decay * dt) + expected_jump
+        out[:-1] = E * M[:-1] + g * (self.kappa * (self.theta - V) * dt)
+        return out
 
 
 def say(msg):
@@ -60,18 +122,15 @@ def exact_driver_integral(t, H=0.12, kappa=3.0):
 def section_a():
     dt = DAY / BARS
     variants = {
-        "driver, shipped lift (N=24, 1e5)": lambda: jh.RoughHost(**KW, jump_mode="driver"),
-        "driver, finer lift (N=40, 1e8)": "finer",
-        "direct, decay kappa = 3/y": lambda: jh.RoughHost(**KW, jump_mode="direct"),
-        "direct, decay 25/y (10-day e-fold)": lambda: jh.RoughHost(**KW, jump_mode="direct", jump_decay=25.0),
-        "Heston host (reference)": lambda: jh.HestonHost(kappa=3.0, theta=0.04, xi=0.3),
+        "driver, shipped lift (N=24, 1e5)": (lambda: DriverIncrementHost(**KW), SHIPPED),
+        "driver, finer lift (N=40, 1e8)": (lambda: DriverIncrementHost(**KW), (40, 1e8)),
+        "direct, decay kappa = 3/y": (lambda: DirectJumpHost(**KW), SHIPPED),
+        "direct, decay 25/y (10-day e-fold)": (lambda: DirectJumpHost(**KW, jump_decay=25.0), SHIPPED),
+        "Heston host (reference)": (lambda: jh.HestonHost(kappa=3.0, theta=0.04, xi=0.3), SHIPPED),
     }
     out = {}
-    for name, make in variants.items():
-        if make == "finer":
-            with rh.using_lift(40, 1e8):
-                r = response(jh.RoughHost(**KW, jump_mode="driver"), dt)
-        else:
+    for name, (make, lift) in variants.items():
+        with rh.using_lift(*lift):
             r = response(make(), dt)
         cum = np.cumsum(r) * dt
         day1 = cum[BARS - 1]
@@ -92,15 +151,16 @@ def section_b():
     for lift_name, (N, eta) in (("shipped (N=24, 1e5)", (24, 1e5)), ("finer (N=40, 1e8)", (40, 1e8))):
         for step_name, dt in (("5 min", DAY / 78), ("1 h", DAY / 6.5), ("1/4 day", DAY / 4)):
             with rh.using_lift(N, eta):
-                host = jh.RoughHost(**KW, jump_mode="driver")
+                host = DriverIncrementHost(**KW)
                 r = response(host, dt, days=2)
             k1d = int(round(DAY / dt))
             row = {"immediate_V_per_J": float(r[0]), "impact_1d_per_J": float(np.sum(r[:k1d]) * dt)}
             out[f"{lift_name}, step {step_name}"] = row
             say(f"B  driver jump, {lift_name}, step {step_name}: V moves {row['immediate_V_per_J']:.1f} J at once; "
                 f"1-day integrated impact {row['impact_1d_per_J']:.5f} J (exact continuous {out['exact_1d_integral_per_J']:.5f} J)")
-    host = jh.RoughHost(**KW, jump_mode="direct")
-    r = response(host, DAY / 78, days=2)
+    with rh.using_lift(*SHIPPED):
+        host = DirectJumpHost(**KW)
+        r = response(host, DAY / 78, days=2)
     out["direct, any step"] = {"immediate_V_per_J": float(r[0]), "impact_1d_per_J": float(np.sum(r[:78]) * DAY / 78)}
     say(f"B  direct jump: V moves {r[0]:.3f} J at once at any step; 1-day impact {out['direct, any step']['impact_1d_per_J']:.5f} J")
     return out
@@ -111,10 +171,10 @@ def section_c():
     grid = [(d, w) for d in (2, 4, 8, 20, 40, 80) for w in (1, 2, 4, 8, 20, 40) if w < d]
     procs = {"n = 0.6": hk.HawkesParams(mu=5.0, alpha=150.0, beta=250.0),
              "n = 0.95": hk.HawkesParams(mu=12.5 * 0.05, alpha=0.95 * 250.0, beta=250.0)}
-    variants = {"driver, shipped lift": (lambda: jh.RoughHost(**KW, jump_mode="driver"), None),
-                "driver, finer lift": (lambda: jh.RoughHost(**KW, jump_mode="driver"), (40, 1e8)),
-                "direct, decay 3/y": (lambda: jh.RoughHost(**KW, jump_mode="direct"), None),
-                "direct, decay 25/y": (lambda: jh.RoughHost(**KW, jump_mode="direct", jump_decay=25.0), None)}
+    variants = {"driver, shipped lift": (lambda: DriverIncrementHost(**KW), SHIPPED),
+                "driver, finer lift": (lambda: DriverIncrementHost(**KW), (40, 1e8)),
+                "direct, decay 3/y": (lambda: DirectJumpHost(**KW), SHIPPED),
+                "direct, decay 25/y": (lambda: DirectJumpHost(**KW, jump_decay=25.0), SHIPPED)}
     out = {}
     for vname, (make, lift) in variants.items():
         for pname, proc in procs.items():
@@ -177,8 +237,9 @@ def event_study(R, RV, horizon=30, z=3.0, trail=60, base=20, gap=10):
 def section_d(n_hist=12, years=3):
     hawkes = hk.HawkesParams(mu=5.0, alpha=150.0, beta=250.0)
     dt = DAY / BARS
-    direct = jh.RoughHost(**KW, jump_mode="direct", jump_decay=25.0)
-    driver = jh.RoughHost(**KW, jump_mode="driver")
+    with rh.using_lift(*SHIPPED):                 # the hosts read the lift at construction
+        direct = DirectJumpHost(**KW, jump_decay=25.0)
+        driver = DriverIncrementHost(**KW)
     # match the extra variance over the first day of a jump: J_driver = J_direct * direct / driver per unit J
     k1d = BARS
     per_direct = float(np.sum(response(direct, dt, days=2)[:k1d]) * dt)
