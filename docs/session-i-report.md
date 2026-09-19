@@ -222,7 +222,7 @@ one, as they already compare runs within one machine. Since then: 121 of 121, 0 
 
 | check | result |
 |---|---|
-| full test suite (`pytest`) | PYTEST_RESULT |
+| full test suite (`pytest`) | **105 items, 658 checks, 0 failed**, 15 suites; locally in 23 min, and on Linux in CI |
 | suites run on their own during the session | `test_rough` 76/76, `test_hawkes` 52/52, `test_filters` 46/46, `test_nongaussian` 20/20, `test_recording` 37/37, `test_protocol` 9/9, `test_rough_calibration` 35/35 |
 | health checks (`healthcheck.py --trend`) | **121 of 121**, 0 trend flags; rough objective 0.46 s |
 | CI on Linux (GitHub Actions) | quick tier passed in 1 min 35 s; **full tier passed in 13 min 53 s**: 105 items, 658 checks, 0 failed; 121 of 121 health checks, 0 trend flags |
