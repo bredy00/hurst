@@ -26,6 +26,11 @@ History:
   series     daily realised variance from 5-minute bars (Garman-Klass if too few)
   filters    CIR by maximum likelihood; the lifted rough filter with H profiled on a
              grid (xi re-fitted at each H), a bank-of-filters posterior over H
+  boundary   the zero-boundary protocol at the profile maximum (filters/protocol.py,
+             Session I): the Kalman filter unless its predicted variance is within two
+             sd of zero on more than 5% of days; then the cf filter takes the state
+             estimate, confirmed by a 16-substep particle filter (escalated to 64
+             substeps when they disagree); --quick skips the confirmation
   H          (3) from the filter's profile likelihood
              (4) from the structure function of log realised volatility
 
@@ -187,8 +192,9 @@ def trading_clock(snapshot, max_peers=12):
 
 
 # ------------------------------------------------------------------ history
-def analyse_history(data, dt=1.0 / 252, max_days=750, profile_names=("xi",)):
+def analyse_history(data, dt=1.0 / 252, max_days=750, profile_names=("xi",), confirm=True):
     import filters.kalman as kf
+    import filters.protocol as proto
     rv = hist.realised_variance(data["bars5m"])
     if len(rv["date"]) >= 120:
         y, dates, source = rv["rv"], rv["date"], "realised variance (5-minute bars)"
@@ -208,12 +214,17 @@ def analyse_history(data, dt=1.0 / 252, max_days=750, profile_names=("xi",)):
     theta0 = float(np.mean(y))
     R0 = float(np.var(np.diff(y))) / 2.0                 # the lag-1 jump of noise is mostly R
     cm = kf.CIRModel(dt)
-    fit = kf.fit_mle(cm, y, dict(kappa=5.0, theta=theta0, xi=0.5, R=R0))
+    fit = kf.fit_mle_multistart(cm, y, dict(kappa=5.0, theta=theta0, xi=0.5, R=R0), values=(2.0, 10.0, 40.0))
     out["cir"] = {"params": fit["params"], "se": fit["se"], "loglik": fit["loglik"]}
 
     # Daily realised variance measures the INTEGRAL of V over the day: the filter
     # must observe that, with RV's own sampling noise, or H comes out far too high
     # (0.39 for a true 0.10 on synthetic data with the spot-variance filter).
+    # RV's sampling error at the prior mean (Session G's model). Not at the observed RV: that
+    # weights each day by its own noise realisation, and on the synthetic history (planted
+    # H = 0.10) it moved the profile's H from 0.130 to 0.183 (Session I). The zero-boundary
+    # protocol below does use the observed RV -- for state estimation, where it keeps the
+    # non-Gaussian filters from breaking on days whose RV jumps above a small forecast.
     rv_model = lambda dt_, H, v0, N=None: kf.LiftedRoughRVModel(dt_, H=H, v0=v0, N=N, bars_per_day=m_equiv)
     p0 = dict(kappa=3.0, theta=theta0, xi=0.3, R=1e-10)
     prof = kf.profile_h(y, H_GRID, p0, dt, theta0, names=profile_names, model_cls=rv_model)
@@ -224,51 +235,101 @@ def analyse_history(data, dt=1.0 / 252, max_days=750, profile_names=("xi",)):
                             "bank_mean": float(bank["mean"][-1]), "bank_sd": float(bank["sd"][-1]),
                             "loglik_vs_cir": float(prof["loglik"].max() - fit["loglik"])}
     out["_series"] = {"dates": dates, "y": y.tolist(), "bank_mean_path": bank["mean"].tolist()}
+
+    # (5) the zero-boundary protocol at the profile maximum (Session I): the Kalman filter
+    # unless the boundary binds, then the cf filter, confirmed by the particle filter
+    j = int(np.argmax(prof["loglik"]))
+    pr = proto.run(prof["params"][j], y, dt=dt, H=float(H_GRID[j]), v0=theta0, bars_per_day=m_equiv,
+                   confirm=confirm)
+    zb = {"H": float(H_GRID[j]), "boundary_share": pr["boundary"]["share"], "binds": pr["boundary"]["binds"],
+          "state_estimate": pr["state_estimate"], "kalman_loglik": pr["kalman"]["loglik"]}
+    if "cf" in pr:
+        zb.update(cf_loglik=pr["cf"]["loglik"], cf_fallback_days=pr["cf"]["fallback_days"],
+                  cf_capped_days=pr["cf"]["capped_days"])
+        out["_series"]["cf_filtered_rv"] = pr["cf"]["filtered_rv"]
+    if "confirmation" in pr:
+        c = pr["confirmation"]
+        zb.update(confirmed=c["confirmed"], verdict=c["verdict"], checks=c["checks"],
+                  particle_loglik=c["particle_loglik_mean"],
+                  cf_minus_particle_per_day=c["cf_minus_particle_per_day"],
+                  kalman_minus_particle=c["kalman_minus_particle"],
+                  median_rel_rv_diff=c["median_rel_rv_diff_boundary_days"])
+        if "escalation" in c:
+            zb["escalation"] = {k: c["escalation"][k] for k in ("substeps", "loglik", "cf_minus_particle_per_day",
+                                                                 "particle16_minus_particle")}
+    out["zero_boundary"] = zb
     return out
 
 
 # ------------------------------------------------------------------ report
 def plot(report, S, fits, path):
+    """
+    The run's figure, in the ui.theme light system (Session I): maturities on the ordinal
+    blue ramp, one hue per entity, reference lines in muted ink with their own labels,
+    and no second y-axis -- the history's volatility and its H path are two panels that
+    share the time axis.
+    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(2, 2, figsize=(15, 10))
-    a = ax[0, 0]
+    from matplotlib.colors import LinearSegmentedColormap
+    from ui import theme as th
+    t = th.apply("light")
+    blue, orange = th.series(0), th.series(1)
+    fig = plt.figure(figsize=(15, 10.5))
+    gs = fig.add_gridspec(3, 2, height_ratios=[1.25, 0.62, 0.62], hspace=0.55, wspace=0.28)
+    fig.text(0.012, 0.975, "Real-data run" + ("  (synthetic, known answer)" if report.get("synthetic") else ""),
+             fontsize=15, fontweight="semibold", color=t["ink"], va="top")
+    fig.text(0.012, 0.945, f"generated {report.get('generated', '')}", fontsize=9.5, color=t["ink2"], va="top")
+
+    a = fig.add_subplot(gs[0, 0])
     if S is not None:
-        cols = plt.cm.viridis(np.linspace(0, 1, S.n_expiries))
-        for (t, idx), c in zip(S.by_expiry, cols):
-            a.plot(S.k[idx], 100 * S.iv[idx], "o", ms=3, color=c, label=f"{t*365:.0f} d")
+        # maturity is ordered: the ordinal blue ramp from step 250 (clears 2:1 on the surface) to 700
+        ramp = LinearSegmentedColormap.from_list("ordinal_blue", th.BLUE_RAMP[3:])
+        cols = ramp(np.linspace(0, 1, S.n_expiries))
+        for (tt, idx), c in zip(S.by_expiry, cols):
+            a.plot(S.k[idx], 100 * S.iv[idx], "o", ms=4, color=c, mec=t["surface"], mew=0.6, label=f"{tt*365:.0f} d")
         a.set_xlabel("log-moneyness k")
         a.set_ylabel("implied vol (%)")
-        a.set_title("(a) the recorded surface (OTM, IV from mid under our tau)")
-        a.legend(fontsize=7, ncol=2)
-    a = ax[0, 1]
+        a.set_title("(a) The recorded surface: OTM quotes, IV from the mid under our τ")
+        a.legend(ncol=2, title="maturity (light = short)", title_fontsize=8, loc="upper right")
+    a = fig.add_subplot(gs[0, 1])
     ts = report.get("chain", {}).get("skew", {})
     if ts.get("taus"):
         tt = np.array(ts["taus"]) * 365
-        a.loglog(tt, -np.array(ts["skews"]), "o", color="k", label="market ATM skew")
+        a.loglog(tt, -np.array(ts["skews"]), "o", ms=6, color=blue, mec=t["surface"], mew=0.8,
+                 label="market ATM skew per expiry")
         if ts.get("H") is not None:
             xs = np.geomspace(tt.min(), tt.max(), 50)
             ref = -np.array(ts["skews"])[0] * (xs / tt[0]) ** (ts["H"] - 0.5)
-            a.loglog(xs, ref, "--", color="#d62728", label=f"power law, H = {ts['H']:.3f}")
-        a.set_xlabel("tau (days)")
-        a.set_ylabel("-d sigma / dk")
+            a.loglog(xs, ref, "--", color=blue, lw=1.6, label=f"power law τ^(H−½), H = {ts['H']:.3f}")
+        a.set_xlabel("τ (days)")
+        a.set_ylabel("−∂σ/∂k")
         a.set_title("(b) ATM skew term structure")
-        a.legend(fontsize=8)
-    a = ax[1, 0]
+        from matplotlib.ticker import NullFormatter, ScalarFormatter
+        for axis in (a.xaxis, a.yaxis):
+            axis.set_major_formatter(ScalarFormatter())
+            axis.set_minor_formatter(NullFormatter())
+        a.legend(loc="upper right")
     hs = report.get("history")
     if hs:
         yy = np.array(hs["_series"]["y"])
-        a.plot(np.sqrt(yy), color="0.5", lw=0.7, label=f"sqrt({hs['source']})")
+        a = fig.add_subplot(gs[1, 0])
+        a.plot(np.sqrt(np.maximum(yy, 0.0)), color=blue, lw=1.0, label=f"√{hs['source']}")
+        cfp = hs["_series"].get("cf_filtered_rv")
+        if cfp is not None:
+            a.plot(np.sqrt(np.maximum(np.array(cfp), 0.0)), color=orange, lw=1.2,
+                   label="cf filter, filtered (zero-boundary protocol)")
         a.set_ylabel("volatility")
-        a.set_xlabel("trading day")
-        a2 = a.twinx()
-        a2.plot(hs["_series"]["bank_mean_path"], color="#1f77b4", lw=1.2, label="posterior mean H (bank)")
-        a2.set_ylabel("H")
-        a.set_title("(c) the history, and H learned online by the filter bank")
-        a.legend(loc="upper left", fontsize=8)
-        a2.legend(loc="upper right", fontsize=8)
-    a = ax[1, 1]
+        a.set_title("(c) The history")
+        a.legend(loc="lower right", bbox_to_anchor=(1.0, 1.0), ncol=2, borderaxespad=0.3)
+        a.tick_params(labelbottom=False)
+        b = fig.add_subplot(gs[2, 0], sharex=a)
+        b.plot(hs["_series"]["bank_mean_path"], color=blue, lw=1.6)
+        b.set_ylabel("posterior mean H")
+        b.set_xlabel("trading day")
+        b.set_title("(d) H learned online by the filter bank")
+    a = fig.add_subplot(gs[1:, 1])
     names, vals, errs = [], [], []
     hc = report.get("H", {})
     for key, lab in (("skew_term_structure", "(1) surface skew slope"),
@@ -281,18 +342,27 @@ def plot(report, S, fits, path):
             vals.append(v["H"])
             errs.append(v.get("se") if v.get("se") is not None and np.isfinite(v.get("se") or np.nan) else 0.0)
     if names:
-        a.errorbar(vals, np.arange(len(names)), xerr=errs, fmt="o", color="#1f77b4", capsize=3)
-        a.set_yticks(np.arange(len(names)))
-        a.set_yticklabels(names)
+        yv = np.arange(len(names))[::-1]
+        a.axvline(0.5, color=t["muted"], ls=":", lw=1.2)
+        a.text(0.5, yv.max() + 0.55, " H = ½ (Brownian)", color=t["ink2"], fontsize=8, va="bottom")
         truth = report.get("truth_H")
         if truth is not None:
-            a.axvline(truth, color="#d62728", ls="--", label=f"truth {truth}")
-            a.legend(fontsize=8)
-        a.axvline(0.5, color="0.7", ls=":")
-        a.set_xlim(0, 0.55)
+            a.axvline(truth, color=t["ink2"], ls="--", lw=1.2)
+            a.text(truth, yv.max() + 0.55, f" truth {truth}", color=t["ink2"], fontsize=8, va="bottom")
+        a.errorbar(vals, yv, xerr=errs, fmt="o", ms=7, color=blue, ecolor=t["muted"], elinewidth=1.4, capsize=3,
+                   mec=t["surface"], mew=0.8)
+        for v, y_, e in zip(vals, yv, errs):
+            a.text(v + (e or 0.0) + 0.012, y_, f"{v:.3f}" + (f" ± {e:.3f}" if e else ""), color=t["ink2"],
+                   fontsize=8, ha="left", va="center")
+        a.set_yticks(yv)
+        a.set_yticklabels(names)
+        a.set_ylim(-0.6, yv.max() + 1.1)
+        a.set_xlim(min(0.0, min(v - (e or 0.0) for v, e in zip(vals, errs)) - 0.05), 0.62)
+        a.axvline(0.0, color=t["axis"], lw=0.8)
         a.set_xlabel("H")
-        a.set_title("(d) four independent readings of H")
-    fig.tight_layout()
+        a.grid(axis="y", visible=False)
+        a.set_title("(e) Independent readings of H")
+    fig.subplots_adjust(left=0.06, right=0.98, top=0.88, bottom=0.07)
     fig.savefig(path, dpi=120)
 
 
@@ -351,7 +421,7 @@ def run(snapshot=None, history=None, scheme="hybrid", out_dir=None, synthetic=Fa
     if history:
         data = hist.load(history) if not isinstance(history, dict) else history
         report["history_file"] = str(history) if not isinstance(history, dict) else "in memory"
-        hs = analyse_history(data, max_days=500 if quick else 750)
+        hs = analyse_history(data, max_days=500 if quick else 750, confirm=not quick)
         report["history"] = hs
         report["H"]["filter_profile"] = {"H": hs["rough_profile"]["H_hat"], "se": hs["rough_profile"]["se"]}
         report["H"]["structure_function"] = {"H": hs["H_structure"], "se": None}
@@ -409,7 +479,25 @@ def markdown(r):
                   f"- CIR MLE kappa {hs['cir']['params']['kappa']:.2f} (se {hs['cir']['se']['kappa']:.2f})",
                   f"- lifted rough filter: H profile maximum {rp['H_hat']:.3f} (se {rp['se']:.3f}, 95% {rp['ci95'][0]:.3f}-{rp['ci95'][1]:.3f}); "
                   f"bank posterior {rp['bank_mean']:.3f} +/- {rp['bank_sd']:.3f}; log-likelihood over CIR {rp['loglik_vs_cir']:+.1f}",
-                  f"- structure function of log RV: H {hs['H_structure']} (r2 {hs['H_structure_r2']})", ""]
+                  f"- structure function of log RV: H {hs['H_structure']} (r2 {hs['H_structure_r2']})"]
+        zb = hs.get("zero_boundary")
+        if zb:
+            line = (f"- zero boundary (at H = {zb['H']:.2f}): predicted variance within 2 sd of zero on "
+                    f"{100 * zb['boundary_share']:.1f}% of days -> state estimate: **{zb['state_estimate']}**")
+            if "cf_loglik" in zb:
+                line += (f"; cf filter log-likelihood {zb['cf_loglik']:.1f} vs Kalman {zb['kalman_loglik']:.1f} "
+                         f"({zb['cf_fallback_days']} fallback days)")
+            if "confirmed" in zb:
+                verdict = zb["verdict"] if zb["confirmed"] else f"**{zb['verdict']}**"
+                line += (f"; particle-filter confirmation: {verdict} (16 substeps: cf - particle "
+                         f"{zb['cf_minus_particle_per_day']:+.3f} nats/day, filtered RV median difference "
+                         f"{100 * zb['median_rel_rv_diff']:.1f}%")
+                if "escalation" in zb:
+                    e = zb["escalation"]
+                    line += f"; at {e['substeps']} substeps: cf - particle {e['cf_minus_particle_per_day']:+.3f} nats/day"
+                line += ")"
+            lines.append(line)
+        lines.append("")
     lines += ["## Four readings of H", "", "| estimator | H | se |", "|---|---|---|"]
     for key, v in r["H"].items():
         se = v.get("se")
@@ -454,8 +542,8 @@ def main(argv=None):
     ap.add_argument("--quick", action="store_true", help="skip calibration (checks, skew H, filters only)")
     ap.add_argument("--max-seconds", type=float, default=900)
     ap.add_argument("--lift", default=None, metavar="N:ETA_N",
-                    help="run the whole pipeline on another lift, e.g. 40:1e8 (the finer lift under decision); "
-                         "default is the shipped 24:1e5")
+                    help="run the whole pipeline on another lift, e.g. 24:1e5 (the Sessions A-H lift); "
+                         "the default is 40:1e8, adopted in Session I")
     args = ap.parse_args(argv)
     if args.lift:
         n_, eta_ = args.lift.split(":")

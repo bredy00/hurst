@@ -81,9 +81,16 @@ class ParticleFilter:
     """
 
     def __init__(self, dt, H=0.12, v0=0.04, N=None, n_particles=2000, substeps=4,
-                 observation="spot", bars_per_day=78, seed=0, burn_days=40):
+                 observation="spot", bars_per_day=78, seed=0, burn_days=40, rv_noise="particle"):
         if observation not in ("spot", "rv"):
             raise ValueError("observation must be 'spot' or 'rv'")
+        if rv_noise not in ("particle", "prior", "observed"):
+            raise ValueError("rv_noise must be 'particle', 'prior' or 'observed'")
+        # RV's sampling variance 2/M (I/dt)^2 at each particle's own I ("particle"), at the
+        # prior mean ("prior") or at the observed RV ("observed"); the last two are the
+        # Kalman and cf filters' observation models -- the settings for confirming them
+        # (Session I)
+        self.rv_noise = rv_noise
         self.dt, self.H, self.v0 = float(dt), float(H), float(v0)
         self.N = rh.N_DEFAULT if N is None else int(N)
         self.w, self.x = rh.lift_nodes(self.H, self.N)
@@ -126,7 +133,13 @@ class ParticleFilter:
                 pred, var = V, np.full(self.P, R)
             else:
                 pred = I / self.dt
-                var = R + 2.0 / self.bars_per_day * pred * pred
+                if self.rv_noise == "particle":
+                    at = pred
+                elif self.rv_noise == "prior":
+                    at = np.full(self.P, float(pred.mean()))
+                else:
+                    at = np.full(self.P, max(float(y[t]), 0.0))
+                var = R + 2.0 / self.bars_per_day * at * at
             logw = -0.5 * ((y[t] - pred) ** 2 / var + np.log(var) + log2pi)
             top = logw.max()
             wt = np.exp(logw - top)
@@ -276,7 +289,8 @@ class AdaptedParticleFilter(ParticleFilter):
             m_r, s2_r, mu_r = m[idx], s2[idx], mu[:, idx]
             zp = rng.standard_normal((len(self.w), P))
             Vbar = s2_r / (st.xi ** 2 * st.cSc)
-            Y = mu_r + st.reg[:, None] * (V - m_r)[None, :] + (st.L_perp @ zp[:r]) * (st.xi * np.sqrt(Vbar))[None, :]
+            Y = mu_r + st.reg[:, None] * (V - m_r)[None, :] + \
+                (st.L_perp @ zp[:r]) * (st.xi * np.sqrt(Vbar * st._noise_r2(V, m_r)))[None, :]
             if keep_path:
                 mean_V[t] = float(V.mean())
                 q05[t], q95[t] = np.quantile(V, [0.05, 0.95])

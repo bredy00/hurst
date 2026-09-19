@@ -1,7 +1,7 @@
 """
 Session F, task F2: Kalman, adaptive Kalman and dual Kalman filtering on three
 hosts -- the lecture's OU state space, classical Heston (CIR variance) and the
-lifted rough Heston, whose 24 Markov factors are the filter's state.
+lifted rough Heston, whose Markov factors (40 on the default lift) are the filter's state.
 
 What is asserted and what is only measured:
 
@@ -260,7 +260,8 @@ def test_rough_host():
     for seed in range(3):
         V, _ = kf.simulate_rough(rm, pr, 2000, seed=10 + seed, scheme="euler")
         y = V + np.random.default_rng(200 + seed).normal(0.0, math.sqrt(pr["R"]), 2000)
-        fit = kf.fit_mle(cm, y, dict(kappa=3.0, theta=float(np.mean(y)), xi=0.3, R=pr["R"]))
+        # several starts: from kappa = 3 alone one path stops at kappa = theta = 0, 69 nats below its MLE
+        fit = kf.fit_mle_multistart(cm, y, dict(kappa=3.0, theta=float(np.mean(y)), xi=0.3, R=pr["R"]))
         pc = fit["params"]
         rl = kf.kalman_filter(rm, pr, y)
         rc = kf.kalman_filter(cm, pc, y)
@@ -301,7 +302,7 @@ def test_rough_host():
                            (rp["final"]["kappa"] - rows[-1][0]) / rows[-1][1]))
     print("      rough QML: " + "  ".join(f"[MLE {a:.2f}+/-{s:.2f}, dual {d:.2f}, recursive MLE {r:.2f}; V<0 on {100*f:.0f}% of days]"
                                         for a, s, d, r, f in rows) + f"  ({time.perf_counter()-t0:.0f}s)")
-    check("recursive MLE on the 24-factor rough state ends within 1 SE of the QML estimate",
+    check("recursive MLE on the lifted rough state (40 factors) ends within 1 SE of the QML estimate",
           all(abs(r - a) < s for a, s, d, r, f in rows), ", ".join(f"{(r-a)/s:+.2f} SE" for a, s, d, r, f in rows))
 
     # Where the rough QML bias comes from: the positivity floor. Simulated rough
@@ -379,7 +380,11 @@ def test_rough_positivity_and_qml():
         zs["Euler data + Euler filter, floor binds"].append(newton_z(m_eu, pz, V + eps))
         V, _ = kf.simulate_rough(m_ex, pz, 3000, seed=seed)
         zs["QE data + exact filter, V near zero"].append(newton_z(m_ex, pz, V + eps))
-        V, _ = kf.simulate_rough(m_nf, no_floor, 3000, seed=seed)
+        # 16 substeps: on the 40-node lift (Session I) data at the default 4 put QML kappa at
+        # +1.14 SE on average (+1.13 with Sessions G-H's fixed-size factor noise, +0.22 on the
+        # 24-node lift), and +0.35 at 16 -- the simulator under-resolving the stiffer lift,
+        # not a filter bias
+        V, _ = kf.simulate_rough(m_nf, no_floor, 3000, seed=seed, substeps=16)
         zs["QE data + exact filter, V away from zero"].append(newton_z(m_nf, no_floor, V + eps))
     print("      kappa, one Newton step from the truth, in SE (6 seeds): " + "  ".join(
         f"[{k}: mean {np.mean(v):+.2f}; {', '.join(f'{z:+.1f}' for z in v)}]" for k, v in zs.items())
@@ -434,7 +439,7 @@ def test_learn_h():
     # realised variance is an integral over the day: the observation model matters
     truth = rh.RoughHestonParams(0.025, 2.0, 0.035, 0.4, -0.7, 0.10)
     t0 = time.perf_counter()
-    w_, x_ = rh.lift_nodes(0.10, 24)
+    w_, x_ = rh.lift_nodes(0.10)
     st = rh.LiftedAffineStep(w_, x_, truth.v0, truth.kappa, truth.theta, truth.xi, DT)
     check("integrated-variance moments: the quadrature grid reproduces the closed-form covariance",
           st.check_quadrature(st.y_star) < 1e-12, f"{st.check_quadrature(st.y_star):.1e}")

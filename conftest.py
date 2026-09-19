@@ -19,6 +19,7 @@ SLOW = {
     "test_rough_calibration.py": None,          # whole module
     "test_filters.py": None,
     "test_nongaussian.py": None,                # Session H: particle / cf filters, ~4 minutes
+    "test_protocol.py": {"test_rv_filter_and_protocol"},   # Session I: runs the particle filter
     "test_rough.py": {"test_monte_carlo", "test_positivity_scheme", "test_solver_robustness"},
     "test_hawkes.py": {"test_second_spike_monte_carlo", "test_kurtosis"},
     "test_calibrate.py": {"test_multistart", "test_identifiability", "test_identifiability_mechanism"},

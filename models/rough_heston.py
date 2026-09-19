@@ -634,8 +634,10 @@ class LiftedAffineStep:
         V = self.qe_draw(m, s2, z, u)
         Vbar = s2 / (self.xi ** 2 * self.cSc)
         r = self.L_perp.shape[1]
-        y_new = mu + self.reg[:, None] * (V - m)[None, :] + \
-            (self.L_perp @ zp_full[:r]) * (self.xi * np.sqrt(Vbar * self._noise_r2(V, m)))[None, :]
+        # the same operations in the same order as step_y, so the two agree bit for bit
+        scale = self.xi * np.sqrt(Vbar)
+        rt = np.sqrt(self._noise_r2(V, m))
+        y_new = mu + self.reg[:, None] * (V - m)[None, :] + (self.L_perp @ zp_full[:r]) * (scale * rt)[None, :]
         EI = np.maximum(self.EI_const + self.EI_lin @ y, 0.0)
         dI = np.maximum(EI + self._i_slope(y, s2) * (V - m), 0.0)
         return y_new, V, dI

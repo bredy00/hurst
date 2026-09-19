@@ -73,7 +73,7 @@ def test_pieces():
     check("a small change in the weights moves the resampled set 10x less when sorted by the key",
           srt * 10 < uns, f"mean key shift {srt:.2e} sorted vs {uns:.2e} in random order")
 
-    w24, x24 = rh.lift_nodes(0.12, 24)
+    w24, x24 = rh.lift_nodes(0.12)
     st = rh.LiftedAffineStep(w24, x24, 0.04, 3.0, 0.04, 0.3, DT / 4)
     n = 5000
     Y = np.repeat(st.y_star[:, None], n, axis=1) * (1.0 + 0.3 * np.random.default_rng(2).standard_normal((1, n)))
@@ -109,13 +109,13 @@ def test_densities():
 # --- the cf ---------------------------------------------------------------------------------
 def test_cf():
     print("\nThe variance cf against the exact affine moments")
-    w24, x24 = rh.lift_nodes(0.12, 24)
+    w24, x24 = rh.lift_nodes(0.12)
     worst = 0.0
     for kap, th, xi in ((3.0, 0.04, 0.3), (3.0, 0.09, 0.08), (1.0, 0.02, 0.6)):
         st = rh.LiftedAffineStep(w24, x24, th, kap, th, xi, DT)
         A, b = st.transition_U()
         Us = st.U_from_y(st.y_star[:, None])[:, 0]
-        for U in (Us, Us + 0.002 * np.random.default_rng(0).standard_normal(24)):
+        for U in (Us, Us + 0.002 * np.random.default_rng(0).standard_normal(len(w24))):
             dz = 1e-3
             z = np.array([-dz, 0.0, dz])
             a, B = ff.variance_cf_coefficients(z, DT, w24, x24, th, kap, th, xi)

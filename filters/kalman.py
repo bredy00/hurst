@@ -408,13 +408,24 @@ class LiftedRoughRVModel(LiftedRoughModel):
 
     The observation noise is R plus realised variance's own sampling variance,
     2 / M * E[y_t]^2 with M intraday returns (Barndorff-Nielsen & Shephard 2002,
-    for a diffusion), evaluated at the prior mean.
+    for a diffusion), evaluated at the prior mean -- or, with rv_noise="observed"
+    (Session I), at the observed RV itself, their feasible version. At the zero
+    boundary the prior-mean version turns a day whose RV jumps above its forecast into
+    an observation of 16% relative precision at the FORECAST's scale, deep in the
+    predictive tail; the observed version keeps the error proportional to what was seen.
+    But it weights each day by its own noise realisation, which biases estimation: the
+    H profile on a synthetic history with H = 0.10 read 0.183 with it and 0.130 without.
+    So "observed" is for the zero-boundary protocol's state estimation, "prior" for
+    estimating parameters.
     """
 
-    def __init__(self, dt, H=0.12, v0=0.04, N=None, bars_per_day=78):
+    def __init__(self, dt, H=0.12, v0=0.04, N=None, bars_per_day=78, rv_noise="prior"):
         super().__init__(dt, H=H, v0=v0, N=N, discretisation="exact")
         self.dim = len(self.w) + 1
         self.bars_per_day = int(bars_per_day)
+        if rv_noise not in ("prior", "observed"):
+            raise ValueError("rv_noise must be 'prior' or 'observed'")
+        self.rv_noise = rv_noise
 
     def transition(self, p):
         st = self.stepper(p)
@@ -446,8 +457,11 @@ class LiftedRoughRVModel(LiftedRoughModel):
         H[-1] = 1.0 / self.dt
         return H, 0.0
 
-    def observation_var(self, p, z):
-        m = max(float(z[-1]) / self.dt, 0.0)
+    def observation_var(self, p, z, y_obs=None):
+        if self.rv_noise == "observed" and y_obs is not None:
+            m = max(float(y_obs), 0.0)
+        else:
+            m = max(float(z[-1]) / self.dt, 0.0)
         return 2.0 / self.bars_per_day * m * m
 
     def initial(self, p):
@@ -660,11 +674,11 @@ def _shock_direction(model, p, x, H):
 def kalman_filter(model, p, y, policy=None, x0=None, P0=None):
     """
     Run the filter over observations y (1-D). Returns a dict of arrays:
-    x_prior, x_post (n, dim), P_post (n, dim, dim), innov, S, gain (n, dim),
+    x_prior, x_post (n, dim), P_prior, P_post (n, dim, dim), innov, S, gain (n, dim),
     and loglik (the prediction-error decomposition, constant included).
 
     Joseph-form covariance update, (I - K H) P (I - K H)' + K R K', so P stays
-    symmetric positive semi-definite for the 24-factor rough model too.
+    symmetric positive semi-definite for the 40-factor rough model too.
     """
     policy = Strict() if policy is None else policy
     policy.reset()
@@ -685,6 +699,7 @@ def kalman_filter(model, p, y, policy=None, x0=None, P0=None):
     out_prior = np.empty((n, d))
     out_post = np.empty((n, d))
     out_P = np.empty((n, d, d))
+    out_Pp = np.empty((n, d, d))
     innov = np.empty(n)
     S_arr = np.empty(n)
     gain = np.empty((n, d))
@@ -695,8 +710,9 @@ def kalman_filter(model, p, y, policy=None, x0=None, P0=None):
             x = A @ x + b
             P = A @ P @ A.T + Q
         out_prior[k] = x
+        out_Pp[k] = P
         nu = y[k] - (float(H @ x) + c)
-        R = p["R"] + (obs_var(p, x) if obs_var is not None else 0.0)
+        R = p["R"] + (obs_var(p, x, y[k]) if obs_var is not None else 0.0)
         S = float(H @ P @ H) + R
         # the shock direction costs a process_cov; the strict policy never reads it
         u_dir = None if isinstance(policy, Strict) else _shock_direction(model, p, x, H)
@@ -712,7 +728,7 @@ def kalman_filter(model, p, y, policy=None, x0=None, P0=None):
         innov[k] = nu
         S_arr[k] = S
         gain[k] = K
-    return {"x_prior": out_prior, "x_post": out_post, "P_post": out_P, "innov": innov,
+    return {"x_prior": out_prior, "x_post": out_post, "P_post": out_P, "P_prior": out_Pp, "innov": innov,
             "S": S_arr, "gain": gain, "loglik": ll,
             "estimate": model.measure(out_post)}
 
@@ -864,6 +880,21 @@ def fit_mle(model, y, start, names=None, fixed=None):
 
 
 # ----------------------------------------------------------------- dual & joint
+def fit_mle_multistart(model, y, start, key="kappa", values=(3.0, 10.0, 40.0), names=None, fixed=None):
+    """
+    fit_mle from several values of one parameter; the best log-likelihood wins, and the
+    others are kept under "starts". Session I: a CIR fit to rough variance started at
+    kappa = 3 stopped at a boundary optimum (kappa = theta = 0, log-likelihood 3037.2)
+    on one path whose MLE is kappa = 53.9 (3106.4) -- a random-walk variance is a local
+    optimum of the CIR likelihood when the truth reverts fast.
+    """
+    fits = [fit_mle(model, y, dict(start, **{key: v}), names=names, fixed=fixed) for v in values]
+    best = max(fits, key=lambda f: f["loglik"] if np.isfinite(f["loglik"]) else -np.inf)
+    best = dict(best)
+    best["starts"] = [{"start": v, "loglik": f["loglik"], key: f["params"][key]} for v, f in zip(values, fits)]
+    return best
+
+
 def _transform(model, name, value):
     bounds = getattr(model, "bounded", {}).get(name)
     if bounds:
