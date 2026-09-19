@@ -218,7 +218,7 @@ def section_d1():
         for name, (N, eta) in LIFTS.items():
             with lift_as(N, eta):
                 t0 = time.perf_counter()
-                res = calibrate_rough_heston(S, starts=(P,), refine_N=None, max_iter=40, max_seconds=1500)
+                res = calibrate_rough_heston(S, starts=(P,), max_iter=40, max_seconds=1500)
                 q = res["params"]
                 r = {"H": q.H, "kappa": q.kappa, "theta": q.theta, "xi": q.xi, "rho": q.rho, "v0": q.v0,
                      "rmse_vol_vp": 100 * res["rmse_vol"], "seconds": time.perf_counter() - t0,

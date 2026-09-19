@@ -102,10 +102,14 @@ def mu_first_moment(lo, hi, H):
 
 
 # ------------------------------------------------------ D2: sum of exponentials
-N_DEFAULT = 24
+# The lift (Session I): N = 40 nodes, fastest at 1e8/y (0.4 s). Sessions D-H shipped
+# N = 24 at 1e5/y (7 minutes); study_finer_lift.py and docs/comparison-finer-lift.pdf
+# measured the change and Akin adopted it on 18 September 2026.
+N_DEFAULT = 40
+ETA_N_DEFAULT = 1.0e8
 
 
-def lift_nodes(H, N=N_DEFAULT, eta_1=0.1, eta_N=1.0e5):
+def lift_nodes(H, N=N_DEFAULT, eta_1=0.1, eta_N=ETA_N_DEFAULT):
     """
     Nodes x_i and weights w_i with K(t) ~ sum_i w_i e^{-x_i t}.
 
@@ -125,9 +129,17 @@ def lift_nodes(H, N=N_DEFAULT, eta_1=0.1, eta_N=1.0e5):
       1/eta_N. The plan's acceptance range was [1 day, 2 years], which
       eta_N = 3000 meets at 0.73% with N = 20 -- but a ONE-DAY option lives
       entirely inside the first day, where that kernel is 31% off at one hour.
-      eta_N = 1e5 with N = 24 gives 0.87% on [1 hour, 2 years] (and the same
-      on [1 day, 2 years]); below five minutes it is still 12% off, which is
-      documented rather than hidden. N = 40 reaches 0.37%.
+      Sessions D-H used eta_N = 1e5 with N = 24: 0.87% on [1 hour, 2 years],
+      but 12% off below five minutes, and that cap mattered more than the
+      sup-norm said. The driver's Ito isometry came out 21.6% short at one
+      day, 1-day prices 0.15 vp off true rough Heston, and a calibration to a
+      surface priced by the true model returned H = 0.1145 for 0.12 and 0.0409
+      for 0.05, with residuals of 0.006 vp that hid it. Adding nodes under the
+      same top node (N = 32) changed none of that. The default since Session I
+      is N = 40 up to eta_N = 1e8 (0.4 s): kernel error under 0.91% on both
+      [1 hour, 2 y] and [1 day, 2 y] for every H in [0.02, 0.5], 1-day prices
+      within 0.034 vp, isometry 5.1% short at a day, calibrated H 0.1199 and
+      0.0498, for 1.4x the objective's cost.
     - The published r_n = 1 + 10 n^(-0.9) geometric rule, designed for the
       n -> infinity limit, gives 27% at n = 20 on the pricing range and is not
       used.
@@ -385,13 +397,38 @@ class LiftedAffineStep:
          identically zero), so V_h = v0 + c'y_h holds exactly. The regression
          direction and the orthogonal noise shape are evaluated at the
          stationary state -- V's own moments are exact at every state, the split
-         of its surprise across the factors is exact at stationarity.
+         of its surprise across the factors is exact at stationarity. The
+         noise's size follows the realised V_h (NOISE_SCALE, Session I), with
+         its mean unchanged.
 
     moments_U() gives the exact mean and covariance in the factor coordinates U,
     which is what the Kalman filter now uses instead of the Euler transition.
     """
 
     PSI_C = 1.5       # Andersen's switching value
+
+    # How the factor noise orthogonal to V_h is scaled (Session I).
+    #   "end":        by r^2 = V_h / m, so it vanishes when the draw lands at zero.
+    #                 E[r^2] = 1, so the factors' conditional covariance is unchanged
+    #                 on average; only its mixing over V_h changes.
+    #   "stationary": the fixed size xi^2 Vbar of Sessions G-H, whatever V_h is.
+    # A stiff factor's noise sits in the last 1/lambda of the step, where the local
+    # variance is V_h, not the step's average. With the fixed size, a draw of V_h = 0
+    # (over half of them at psi ~ 3-4) still shook the factors, and 5.2% of steps on the
+    # N = 40, 1e8 lift then started from a state whose next conditional mean m was
+    # <= 0 (2.5% on 24, 1e5). QE can only draw 0 there, a push of -m, so E[int V] came out
+    # +3.0% (4.4 SE) and the at-the-money call 1.1e-3 too high at 250 steps, with more
+    # steps making it worse. Measured at 250 steps, rho = 0: "end" leaves 0.60% of steps
+    # inadmissible and E[int V] within 0.9% (1.3 SE); no orthogonal noise at all gives
+    # 0.0% and -0.8%, which isolates the noise as the cause.
+    NOISE_SCALE = "end"
+
+    def _noise_r2(self, V, m):
+        """The per-path variance multiplier of the orthogonal factor noise (mean 1)."""
+        if self.NOISE_SCALE == "stationary":
+            return np.ones_like(m)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.where(m > 0, V / np.where(m > 0, m, 1.0), 0.0)
 
     def __init__(self, w, x, v0, kappa, theta, xi, h, rho=0.0):
         self.w, self.x = np.asarray(w, float), np.asarray(x, float)
@@ -562,6 +599,28 @@ class LiftedAffineStep:
             out[expo] = np.log(p + (1.0 - p) * beta / (beta - A[expo]))
         return out
 
+    def _i_slope(self, y, s2):
+        """
+        Regression slope of the step's integrated variance I on V_h, exactly:
+        Cov(V_h, I) / Var(V_h), both affine in the state (integrated_moments).
+
+        Sessions G-H used h/2, the slope for a variance that moves linearly across
+        the step. A rough variance does not: its surprise over a step sits mostly in
+        the last instants, which add little to I. Measured at h = 1e-3 y the exact
+        slope is 0.79 h/2 on the N = 24 lift and 0.645 h/2 on the N = 40 default
+        (Session I), so h/2 overstated I's co-movement with V_h by 26% and 55%. This
+        is a correction to the conditional law of I, not the fix for the finer lift's
+        price bias: that came from inadmissible factor states (see NOISE_SCALE).
+        """
+        if getattr(self, "_islope", None) is None:
+            mom = self.integrated_moments()
+            self._islope = (float(self.c @ mom["C_yI_const"]), self.c @ mom["C_yI_lin"])
+        k0, k1 = self._islope
+        cov = k0 + k1 @ y
+        with np.errstate(divide="ignore", invalid="ignore"):
+            g = np.where(s2 > 0, cov / np.where(s2 > 0, s2, 1.0), 0.5 * self.h)
+        return np.clip(g, 0.0, self.h)
+
     def step_given(self, y, z, u, zp_full):
         """
         The variance step with the noise supplied: z, u of shape (n,), zp_full of
@@ -576,9 +635,9 @@ class LiftedAffineStep:
         Vbar = s2 / (self.xi ** 2 * self.cSc)
         r = self.L_perp.shape[1]
         y_new = mu + self.reg[:, None] * (V - m)[None, :] + \
-            (self.L_perp @ zp_full[:r]) * (self.xi * np.sqrt(Vbar))[None, :]
+            (self.L_perp @ zp_full[:r]) * (self.xi * np.sqrt(Vbar * self._noise_r2(V, m)))[None, :]
         EI = np.maximum(self.EI_const + self.EI_lin @ y, 0.0)
-        dI = np.maximum(EI + 0.5 * self.h * (V - m), 0.0)
+        dI = np.maximum(EI + self._i_slope(y, s2) * (V - m), 0.0)
         return y_new, V, dI
 
     def step_y(self, y, rng, with_log_price=False):
@@ -595,30 +654,47 @@ class LiftedAffineStep:
         V = self.qe_draw(m, s2, z, u)
         Vbar = s2 / (self.xi ** 2 * self.cSc)
         zp = rng.standard_normal((self.L_perp.shape[1], n))
-        scale = self.xi * np.sqrt(Vbar)
-        y_new = mu + self.reg[:, None] * (V - m)[None, :] + (self.L_perp @ zp) * scale[None, :]
+        scale = self.xi * np.sqrt(Vbar)                   # the orthogonal noise's mean size
+        r2 = self._noise_r2(V, m)
+        rt = np.sqrt(r2)
+        y_new = mu + self.reg[:, None] * (V - m)[None, :] + (self.L_perp @ zp) * (scale * rt)[None, :]
         if not with_log_price:
             return y_new, V
         EI = np.maximum(self.EI_const + self.EI_lin @ y, 0.0)
-        dI = np.maximum(EI + 0.5 * self.h * (V - m), 0.0)
+        gI = self._i_slope(y, s2)
+        dI = np.maximum(EI + gI * (V - m), 0.0)
         # Cov(V_h, dZ) is >= 0 for any admissible state and bounded by Cauchy-Schwarz
         cov = np.clip(self.zeta_const + self.zeta_lin @ y, 0.0, np.sqrt(s2 * EI))
         with np.errstate(divide="ignore", invalid="ignore"):
             gam = np.where(s2 > 0, cov / np.where(s2 > 0, s2, 1.0), 0.0)
             lev = np.where(scale > 0, cov / np.where(scale > 0, scale, 1.0), 0.0)
-        # dZ = gam (V_h - m) + [part correlated with the orthogonal factor noise] + independent rest
-        corr_part = (self.b_ref @ zp) * lev
-        resid = np.maximum(EI - gam * cov - (self.b_ref @ self.b_ref) * lev * lev, 0.0)
+        # dZ = gam (V_h - m) + [part correlated with the orthogonal factor noise] + independent rest.
+        # The correlated part scales with the noise it is correlated with (r), so
+        # Cov(dZ, factor noise) keeps its mean cov * d_ref (E[r^2] = 1) and resid does too.
+        bb = float(self.b_ref @ self.b_ref)
+        corr_part = (self.b_ref @ zp) * lev * rt
+        resid = np.maximum(EI - gam * cov - bb * lev * lev, 0.0)
         dZ = gam * (V - m) + corr_part + np.sqrt(resid) * rng.standard_normal(n)
         # Martingale correction (Andersen 2008): conditional on V_h and the factor
         # noise, E[exp(dX)] = exp(A (V_h - m) + rho corr_part + c0), with
-        # A = rho gam - rho^2 h / 4 and c0 = -rho^2 EI / 2 + rho^2 resid / 2. The
-        # factor-noise part is Gaussian (its mgf is exact); V_h is not, so its
-        # QE mgf is used.
+        # A = rho gam - rho^2 gI / 2 (gI the slope of I on V_h; h/2 before Session I)
+        # and c0 = -rho^2 EI / 2 + rho^2 resid / 2. The factor-noise part is Gaussian
+        # given V_h, with variance bb lev^2 r^2: its mgf adds rho^2 bb lev^2 r^2 / 2,
+        # a constant when r = 1 and linear in V_h when r^2 = V_h / m. V_h is not
+        # Gaussian, so its QE mgf is used.
         rho = self.rho
-        A = rho * gam - 0.25 * rho * rho * self.h
-        c0 = -0.5 * rho * rho * EI + 0.5 * rho * rho * resid +             0.5 * rho * rho * (self.b_ref @ self.b_ref) * lev * lev
-        drift_fix = -(c0 - A * m + self.qe_log_mgf(A, m, s2))
+        A = rho * gam - 0.5 * rho * rho * gI
+        c0 = -0.5 * rho * rho * EI + 0.5 * rho * rho * resid
+        noise_var = 0.5 * rho * rho * bb * lev * lev
+        # log E[exp(dX)] = -A m + c0 + log E[exp(A_V V_h)]; the noise term multiplies
+        # V_h itself, not V_h - m, so it enters A_V but not the centring -A m.
+        if self.NOISE_SCALE == "stationary":
+            c0 = c0 + noise_var
+            A_V = A
+        else:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                A_V = A + np.where(m > 0, noise_var / np.where(m > 0, m, 1.0), 0.0)
+        drift_fix = -(c0 - A * m + self.qe_log_mgf(A_V, m, s2))
         return y_new, V, dI, dZ, drift_fix
 
     def integrated_moments(self, n_panels=36, order=16):
@@ -745,10 +821,14 @@ def _phi123(c):
 
 # Stability constants on z = h^alpha / Gamma(1+alpha) * (xi (1+|rho|) |u|_max + kappa),
 # one per scheme, both MEASURED as the edge where |phi(u - i/2)| first exceeds one
-# over u in [0, 1200] (it may never exceed one for a correct solve):
-#   etdrk4   stable at 2.65, blows up at 4.0                     -> 2.0 used
-#   exptrap  stable at z = 10.3 .. 14.7, blows up at 24.6 .. 30.3 -> 12.0 used
-# measured at H = 0.02 and 0.12, maturities 30 d to 1 y.
+# over u in [0, 1200] (it may never exceed one for a correct solve), at H = 0.02 and
+# 0.12, maturities 30 d to 1 y:
+#   N = 24, 1e5 (Session G)   etdrk4 stable at 2.65, blows up at 4.0
+#                             exptrap stable at 10.3 .. 14.7, blows up at 24.6 .. 30.3
+#   N = 40, 1e8 (Session I,   etdrk4 edge 4.25 (H = 0.12); stable at 3.0, blows up at
+#   study_stability_           4.0 (H = 0.02)
+#   constants.py)             exptrap edge 14.5 (H = 0.02), 18.8 (H = 0.12), bisected
+# The constants in use sit below every edge on both lifts: 2.0 and 12.0.
 C_STAB = {"etdrk4": 2.0, "exptrap": 12.0}
 
 
@@ -856,7 +936,7 @@ COST_PER_STEP = {"etdrk4": 1.36, "exptrap": 1.0}
 
 
 def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
-                  scheme="etdrk4", c_stab=None, check_stability=True, eta_N=1.0e5):
+                  scheme="etdrk4", c_stab=None, check_stability=True, eta_N=ETA_N_DEFAULT):
     """
     log cf(u) for the lifted rough Heston, from the N-factor Riccati system
 
@@ -948,23 +1028,21 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
         wE = E * w[None, :]
         wE2 = E2 * w[None, :]
         wA1, wA2, wA3 = A1 @ w, A2 @ w, A3 @ w
-        # The two products in this loop are chosen by measurement, per size.
-        # Contraction w @ psi: OpenBLAS pays ~80 us of thread dispatch per call
-        # whatever the size, so einsum wins below ~1000 u-nodes (39 vs 79 us at
-        # 512) and matmul above (85 vs 143 us at 2048). Rank-3 update: one
-        # real @ complex product on a pre-stacked (N, 3) matrix, 23 us at 512 --
-        # broadcasting A1[:, None] * Nu + ... was tried and cost 438 us.
-        use_einsum = n_u <= 1024
-        Astack = np.stack([A1, A2, A3], axis=2)          # (M, N, 3)
+        # Both products in this loop are REAL matrix products on interleaved views
+        # of the complex arrays (Session I). The weights are real, so w @ psi is two
+        # real contractions, one per part; viewing psi (N, n_u) complex as (N, 2 n_u)
+        # real makes it one dgemv with no complex cast. Measured at N = 40, 576
+        # u-nodes: 14 us against 123 us for einsum and 141 us for the complex
+        # matmul (Session E chose einsum over the latter's ~80 us of thread
+        # dispatch). The rank-3 update goes the same way onto psi's own memory.
+        Astack = np.ascontiguousarray(np.stack([A1, A2, A3], axis=2))    # (M, N, 3)
         Vbuf = np.empty((3, n_u), dtype=complex)
+        Vr = Vbuf.view(np.float64)                   # (3, 2 n_u)
+        pr = psi.view(np.float64)                    # (N, 2 n_u), the same memory as psi
         for j in range(M):
             h = hs[j]
-            if use_einsum:
-                S2 = np.einsum("i,ij->j", wE2[j], psi)
-                S1 = np.einsum("i,ij->j", wE[j], psi)
-            else:
-                S2 = wE2[j] @ psi
-                S1 = wE[j] @ psi
+            S2 = (wE2[j] @ pr).view(complex)
+            S1 = (wE[j] @ pr).view(complex)
             Nu = F(Psi)
             Gu = kt * Psi + v0 * Nu
             Pa = S2 + s_h[j] * Nu
@@ -974,11 +1052,11 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
             Pc = S1 + s_h2[j] * Nu + s_h[j] * (2.0 * Nb - Nu)
             Nc = F(Pc)
             Nab = Na + Nb
-            psi *= E[j][:, None]
+            pr *= E[j][:, None]
             Vbuf[0] = Nu
             Vbuf[1] = Nab
             Vbuf[2] = Nc
-            psi += Astack[j] @ Vbuf
+            pr += Astack[j] @ Vr
             Psi = S1 + wA1[j] * Nu + wA2[j] * Nab + wA3[j] * Nc
             phi += (h / 6.0) * (Gu + 2.0 * (kt * (Pa + Pb) + v0 * Nab)
                                 + kt * Pc + v0 * Nc)
@@ -999,10 +1077,15 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
     a0 = B0 @ w
     a1 = B1 @ w
     Fn = F(Psi)
-    use_einsum = n_u <= 1024          # see the ETDRK4 loop for the measurement
+    # real products on interleaved views, as in the ETDRK4 loop; the rank-2 update
+    # was two np.outer calls plus adds, 830 us at N = 40 and 576 u-nodes -> 46 us
+    Bstack = np.ascontiguousarray(np.stack([B0, B1], axis=2))       # (M, N, 2)
+    Fbuf = np.empty((2, n_u), dtype=complex)
+    Fr = Fbuf.view(np.float64)
+    pr = psi.view(np.float64)
     for j in range(M):
         h = hs[j]
-        S1 = np.einsum("i,ij->j", wE[j], psi) if use_einsum else wE[j] @ psi
+        S1 = (wE[j] @ pr).view(complex)
         A = a1[j] * q
         Bq = a1[j] * lin - 1.0
         Cq = S1 + a0[j] * Fn + a1[j] * b0
@@ -1012,8 +1095,10 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
         r2 = (-Bq - disc) / (2.0 * A)
         Pn1 = np.where(np.abs(r1 - pred) < np.abs(r2 - pred), r1, r2)
         Fn1 = F(Pn1)
-        psi *= E[j][:, None]
-        psi += np.outer(B0[j], Fn) + np.outer(B1[j], Fn1)
+        pr *= E[j][:, None]
+        Fbuf[0] = Fn
+        Fbuf[1] = Fn1
+        pr += Bstack[j] @ Fr
         # trapezoid on phi' = kt Psi + v0 F(Psi)
         phi += 0.5 * h * ((kt * Psi + v0 * Fn) + (kt * Pn1 + v0 * Fn1))
         Psi, Fn = Pn1, Fn1

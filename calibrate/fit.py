@@ -346,7 +346,10 @@ def blas_single_thread():
 
 
 KERNEL_TOL = 0.01           # max relative kernel error on [1 day, 2 y], strictly below (review target)
-REFINE_N = 32               # N = 24 breaches KERNEL_TOL below H ~ 0.08; N = 32 holds on the whole box
+# Sessions G-H refined a fit that landed below H ~ 0.08 from N = 24 to N = 32 nodes.
+# The Session I default lift (N = 40, top node 1e8) meets KERNEL_TOL on the whole box
+# (worst 0.91% at H = 0.02), and N = 32 had changed nothing measurable anyway (the
+# calibrated-H bias was identical to N = 24's), so the refinement is gone.
 
 
 def verify_stability(p, surface, N=rh.N_DEFAULT, tail_tol=1e-9):
@@ -369,8 +372,7 @@ def verify_stability(p, surface, N=rh.N_DEFAULT, tail_tol=1e-9):
 
 
 def calibrate_rough_heston(surface, starts=DEFAULT_ROUGH_STARTS, tail_tol=1e-9,
-                           N=rh.N_DEFAULT, prior=None, prior_weight=None, refine_N=REFINE_N,
-                           **lm_kw):
+                           N=rh.N_DEFAULT, prior=None, prior_weight=None, **lm_kw):
     """
     Fit the lifted rough Heston with the SAME driver as vanilla Heston -- that
     is the point of the shared `char_func` interface; nothing in
@@ -389,8 +391,7 @@ def calibrate_rough_heston(surface, starts=DEFAULT_ROUGH_STARTS, tail_tol=1e-9,
 
     Two hard checks on the answer (Session G), both in the result:
     - kernel_ok: the lift's kernel error at the FITTED H is below KERNEL_TOL.
-      N = 24 meets it for H >= 0.08 only; a fit that lands lower is polished
-      again from where it stopped with refine_N nodes.
+      The default lift meets it for every H in the box (Session I).
     - stability: every expiry re-priced from scratch at the fitted parameters
       passes the invariant checks (verify_stability).
     res["ok"] is both.
@@ -409,13 +410,6 @@ def calibrate_rough_heston(surface, starts=DEFAULT_ROUGH_STARTS, tail_tol=1e-9,
     res["kernel_error"] = rh.kernel_error(p.H, N)[0]
     res["pricer_stats"] = dict(pricer.pricer.stats)
     res["N"] = N
-    if res["kernel_error"] >= KERNEL_TOL and refine_N and refine_N > N:
-        polish = dict(lm_kw)
-        polish["max_iter"] = min(int(polish.get("max_iter", 20)), 20)
-        again = calibrate_rough_heston(surface, starts=(p,), tail_tol=tail_tol, N=refine_N, prior=prior,
-                                       prior_weight=prior_weight, refine_N=None, **polish)
-        again["refined_from"] = {"N": N, "params": p, "kernel_error": res["kernel_error"]}
-        return again
     res["kernel_ok"] = res["kernel_error"] < KERNEL_TOL
     res["stability"] = verify_stability(p, surface, N, tail_tol)
     res["ok"] = bool(res["kernel_ok"] and res["stability"]["ok"])

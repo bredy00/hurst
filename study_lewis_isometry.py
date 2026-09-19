@@ -69,10 +69,10 @@ def section_a():
     out = {"t": ts.tolist(), "curves": {}}
     for H in (0.05, 0.12, 0.30):
         for N in (24, 32):
-            w, x = rh.lift_nodes(H, N)
+            w, x = rh.lift_nodes(H, N, eta_N=1e5)
             rel = isometry_lift(ts, w, x) / isometry_exact(ts, H) - 1.0
             out["curves"][f"H={H} N={N}"] = rel.tolist()
-    w, x = rh.lift_nodes(0.12, 24)
+    w, x = rh.lift_nodes(0.12, 24, eta_N=1e5)
     band = (ts >= 1.0 / 365) & (ts <= 2.0)
     hour = (ts >= 1.0 / (365 * 24)) & (ts <= 2.0)
     rel = isometry_lift(ts, w, x) / isometry_exact(ts, 0.12) - 1.0
@@ -104,7 +104,7 @@ def section_b():
     s = np.exp(np.linspace(math.log(1e-9), math.log(t), 4000))
     out = {"lag": lags.tolist()}
     for N in (24, 32):
-        w, x = rh.lift_nodes(H, N)
+        w, x = rh.lift_nodes(H, N, eta_N=1e5)
         v = []
         for d in lags:
             first = isometry_lift([d], w, x)[0]
