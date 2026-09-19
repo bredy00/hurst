@@ -1,0 +1,6 @@
+chain: 145 quotes; vega units ratio 1.000 (ok); IV(mid, our tau) - IBKR IV median -0.00 vp; weak parity on 0 expiries
+surface: 99 quotes on 5 expiries, 4 skew anchors; skew slope H = -0.03340963486634174
+clock: not identified (no snapshot has weekend or holiday time inside the window)
+fits: Heston rmse 0.473 vp; rough rmse 0.002 vp, H 0.100, ok True
+history: 500 days of realised variance (5-minute bars); CIR kappa 54.1; filter H 0.130 (se 0.024, bank 0.126); structure-function H 0.14798998530266766
+wrote C:\Projects\volatility-surface-tuning\captures\real\report\20260919_200137

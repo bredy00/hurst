@@ -7,7 +7,7 @@ alpha/volatility_surface_1_ALPHA.py   frozen original, md5 5134eff57fedbe6ac0698
 alpha/capture_alpha.py                stand-in feed -> alpha's own plot code
 volatility_surface_2.py               six runtime fixes, maths untouched
 volsurf_core.py                       pure maths: no IO, no scipy, no matplotlib
-volatility_surface_3.py               v2's fixes + correct coordinates
+volatility_surface_3.py               v2's fixes + correct coordinates; the live dashboard (--demo: no TWS)
 fit/svi.py                            raw SVI slice fitting, scipy-free
 sources/replay.py                     JSON record / replay of a chain snapshot
 sources/history.py                    daily history -> realised / Garman-Klass / implied variance
@@ -15,18 +15,21 @@ sources/synthetic.py                  a recording and a history with a KNOWN ans
 record_chains.py                      record real IBKR chains through the replay source
 record_history.py                     pull daily OHLC, IV/HV indices and 5-minute bars from IBKR
 fake_ib.py                            offline stand-in for TWS (tests, CI, synthetic runs)
-run_real_data.py                      recording -> calibration; history -> filters; four readings of H
+run_real_data.py                      recording -> calibration; history -> filters, zero-boundary protocol; H
 models/heston.py                      Heston cf (Albrecher branch) + MC
 pricing/fourier.py                    Lewis + Carr-Madan, adaptive composite quadrature
 models/rough_heston.py                lifted rough Heston: kernel, lift, Riccati cf, Lewis pricer,
                                       exact affine moments + positivity-preserving (QE) step
 models/rough_heston_adams.py          TRUE rough Heston cf by fractional Adams (validation only)
 models/hawkes.py                      Hawkes process: exact simulation, closed forms, MLE, time rescaling
-models/jump_hosts.py                  Hawkes jumps on OU / Heston / rough Heston, exact expectations
+models/jump_hosts.py                  Hawkes jumps on OU / Heston / rough Heston (driver jumps, sized by impact)
+models/fbm.py                         exact fGn / fBm: circulant embedding (Davies-Harte = Wood-Chan), Cholesky, Hosking
 filters/kalman.py                     Kalman on OU / CIR / lifted rough; adaptive, robust, dual, recursive MLE;
                                       exact-moment rough filter, realised-variance filter, H learned
 filters/particle.py                   particle filters on the QE step; fully adapted version at the zero boundary
-filters/fourier.py                    characteristic-function filter (Bates 2006) for the lifted variance
+filters/fourier.py                    characteristic-function filter (Bates 2006): spot or realised-variance observations
+filters/protocol.py                   zero-boundary protocol: Kalman, else cf filter, particle filter confirms
+ui/theme.py                           one design system: dashboard (dark) and report figures (light)
 calibrate/clock.py                    the market's variance clock (omega) and event days from a chain
 calibrate/objective.py                implied-vol loss; model failure is charged, never zeroed
 calibrate/fit.py                      Levenberg-Marquardt, generic over the model; Tikhonov prior;
@@ -42,7 +45,9 @@ study_cir_vs_rough.py                 CIR vs lifted rough filter: cost, forecast
 study_lewis_isometry.py               Ito isometry of the lift, cf drag identity, Lewis tail, lift vs Adams
 study_zero_boundary.py                Kalman vs cf filter vs particle filter at the zero boundary (+ _fine)
 study_finer_lift.py                   N = 24 / 32 / 40 lifts: prices vs Adams, kernel, cost, the H reported
-study_jump_modes.py                   driver vs direct rough jumps: shapes, sizes, second spike, event study
+study_jump_modes.py                   driver vs direct rough jumps (Session H brief; direct mode kept only here)
+study_stability_constants.py          the Riccati stability edges, measured on a given lift
+study_fbm_methods.py                  fBm generators compared; Shevchenko's steps 1-10 checked
 benchmark_riccati.py                  einsum vs matmul vs pinned BLAS in the Riccati step, per n_u
 debug_fbm_helper.py                   the Session A fBm fixture bug, reproduced
 debug_fd_methods.py                   which 2nd-derivative stencil holds order on real grids
@@ -52,17 +57,20 @@ test_surface.py                       45 checks   (audit, SVI, density, replay)
 test_models.py                        25 checks   (Heston cf)
 test_pricing.py                       29 checks   (Fourier pricers)
 test_calibrate.py                     65 checks   (objective, LM, identifiability, prior)
-test_rough.py                         72 checks   (Session D + G: kernel, lift, cf, stability, positivity)
+test_rough.py                         76 checks   (Session D + G + I: kernel, lift, cf, stability, positivity)
 test_rough_calibration.py             35 checks   (Session E: calibration, H, skew; G: weights)
-test_hawkes.py                        54 checks   (Session F1: Hawkes on three hosts)
+test_hawkes.py                        52 checks   (Session F1 + I: Hawkes on three hosts, jump size by impact)
 test_filters.py                       46 checks   (Session F2 + G: Kalman on three hosts, learning H)
 test_recording.py                     37 checks   (Session G: IBKR recording offline, pipeline end to end)
 test_clock.py                         45 checks   (Session H: NYSE calendar, variance time, omega estimator)
 test_nongaussian.py                   20 checks   (Session H: particle and cf filters; slow tier)
+test_protocol.py                       9 checks   (Session I: RV cf filter, zero-boundary protocol)
+test_fbm.py                           19 checks   (Session I: exact fGn / fBm, Breuer-Major)
 conftest.py / pytest.ini              every suite runs under pytest; `-m "not slow"` is the quick tier
 .github/workflows/ci.yml              quick tier on push; full tier + health trend weekly / on demand
 docs/tutorial-ibkr-recording.md       how to install, log in and record (the part that needs Akin)
-docs/comparison-*.pdf                 Session H decision briefs: finer lift, particle vs cf filter, jump modes
+docs/comparison-*.pdf                 Session H decision briefs (finer lift, particle vs cf, jump modes); fBm methods
+docs/session-i-report.pdf             Session I: the decisions implemented, the last checks, v1.0.0
 docs/overview-2026-09-15.pdf          Sessions A-H overview and recommendations
 docs/superpowers/plans/               the six-session rough Heston plan
 captures/                             frames, GIFs, comparisons, snapshot.json
@@ -76,17 +84,19 @@ captures/                             frames, GIFs, comparisons, snapshot.json
 .venv/Scripts/python.exe test_models.py   # 25 passed
 .venv/Scripts/python.exe test_pricing.py  # 29 passed
 .venv/Scripts/python.exe test_calibrate.py # 65 passed
-.venv/Scripts/python.exe test_rough.py     # 72 passed, ~2 min
+.venv/Scripts/python.exe test_rough.py     # 76 passed, ~8 min
 .venv/Scripts/python.exe test_rough_calibration.py  # 35 passed, ~4 min
 .venv/Scripts/python.exe capture_rough_vs_heston.py # Phase 2 headline, ~6 min
-.venv/Scripts/python.exe test_hawkes.py    # 54 passed, ~15 s
-.venv/Scripts/python.exe test_filters.py   # 46 passed, ~5 min
+.venv/Scripts/python.exe test_hawkes.py    # 52 passed, ~20 s
+.venv/Scripts/python.exe test_filters.py   # 46 passed, ~10 min
 .venv/Scripts/python.exe capture_session_f.py # Session F figure
 .venv/Scripts/python.exe -m pytest -m "not slow"  # quick tier, ~3 min
 .venv/Scripts/python.exe test_recording.py # 37 passed, ~30 s
-.venv/Scripts/python.exe -m pytest                # everything: 83 items, 563 checks, ~11 min
+.venv/Scripts/python.exe -m pytest                # everything: 105 items, 658 checks (CI: 12 min)
 .venv/Scripts/python.exe record_chains.py --check # IBKR smoke test (needs IB Gateway)
 .venv/Scripts/python.exe run_real_data.py --synthetic   # pipeline on a known answer
+.venv/Scripts/python.exe volatility_surface_3.py --demo # the live dashboard on a fake market, no TWS
+.venv/Scripts/python.exe healthcheck.py --trend         # 121 analytical checks + trends
 .venv/Scripts/python.exe capture_heston.py      # Heston's own skew term structure
 .venv/Scripts/python.exe capture_calibration.py # Phase 1 baseline vs a rough surface
 .venv/Scripts/python.exe capture_v3.py    # re-render + end-to-end validation
@@ -662,20 +672,47 @@ snapshots, and the skew-slope H again on the measured clock.
 whole stack on another lift; `run_real_data.py --lift 40:1e8` does it for the real run.
 Overview of Sessions A-H: `docs/overview-2026-09-15.pdf`.
 
+## Session I (2026-09-18/19) -- the decisions implemented, v1.0.0
+
+The analytics review's configuration is the default now (`docs/session-i-report.pdf`).
+
+- **Finer lift, adopted.** The lift is now 40 nodes to 1e8/y. The old one runs with
+  `rh.using_lift(24, 1e5)`. Adopting it exposed a QE simulator bias: the fixed-size
+  factor noise left 5.2% of steps in inadmissible states, E[int V] came out +3.0%, and
+  the at-the-money call 7 SE high. That noise now follows V_h / m (0.6%, +0.9%). Four
+  other test failures were premises the finer lift made obsolete, each rewritten
+  against what it measures now.
+- **Zero-boundary protocol** (`filters/protocol.py`):
+  - the Kalman filter runs first;
+  - if its predicted variance is within two sd of zero on more than 5% of days, the cf
+    filter takes the state estimate;
+  - a 16-substep particle filter confirms, escalating to 64 substeps when they disagree.
+
+  The cf filter gained realised-variance observations: the joint transform of (V, int V),
+  frequency panels sized by its stability edge, and the day's integral by Tweedie's
+  formula. Graded on 256-substep data, the 16-substep particle filter proved the worst
+  referee at a hard boundary: 475 nats short of its own converged value, the cf filter
+  128.
+- **Rough jumps go through the driver only,** sized by integrated variance impact.
+- **Health thresholds:**
+  - a CPU reference workload flags throttled runs, which are judged speed-normalised and
+    kept out of the timing trend;
+  - the 2025 clock split is asserted exactly.
+- **One design system** (`ui/theme.py`) for the dashboard (`--demo` runs it without TWS)
+  and the report figure. The figure's dual axis is gone.
+
 ## Still open
 
-- **Real data has not been recorded yet**: IB Gateway needs Akin's login
-  (docs/tutorial-ibkr-recording.md). Everything downstream runs on a synthetic
-  recording with a known answer, and the clock and both lifts are wired in.
-- Decisions pending (Akin): the finer lift as default, particle vs cf filter policy at
-  the zero boundary, the rough jump mode.
-- Realised variance for the history: bipower variation (jumps), microstructure noise,
-  and the RV observation in the adapted particle filter and the cf filter.
+- **Real data has not been recorded yet.** It waits on the IBKR account's validation.
+  Everything downstream has run end to end on synthetic recordings with a known answer.
+- **The cf filter at a hard boundary.** It is 0.43 nats a day short of the converged
+  particle filter at a host that sits at zero on 64% of days. A richer posterior than
+  gamma(V) x Gaussian(U | V) would close part of that.
+- **QE with leverage** keeps a skew bias that shrinks with the steps (+1.5e-4 on a
+  k = +0.08 call at 1000 steps).
 - Hawkes estimation from real event data, and the nearly-unstable Hawkes -> rough
   volatility link as a model rather than a citation.
-- eSSVI (calendar-arbitrage-free by construction; `essvi_calendar_ok` measures
-  but does not prevent).
+- eSSVI (calendar-arbitrage-free by construction; `essvi_calendar_ok` measures but does
+  not prevent).
 - The live IBKR path has still never run against a real TWS.
-- `volatility_surface_3.py` (~1000 lines) should be split.
-- A rough fit is ~1 s per ten-expiry objective evaluation: fine for a study,
-  slow for a live recalibration loop.
+- `volatility_surface_3.py` (~1100 lines) should be split.
