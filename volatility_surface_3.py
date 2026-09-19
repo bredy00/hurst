@@ -26,6 +26,7 @@ the grid carry comparable vega, which is what makes the noise uniform.
 
 import collections
 import math
+import pathlib
 import datetime
 import socket
 import threading
@@ -793,8 +794,9 @@ def seed_and_grid(app, symbol, exps, t0=None, n_sigma=N_SIGMA_BAND, max_strikes=
 
 def start_app(symbol='SPY', host='127.0.0.1', port=7497, client_id=36,
               n_expiries=6, min_days_to_expiry=1, spot_timeout=15.0,
-              market_data_type=1, target_days=None):
-    app = connect_app(symbol, host, port, client_id, spot_timeout, market_data_type)
+              market_data_type=1, target_days=None, app_factory=None):
+    app = connect_app(symbol, host, port, client_id, spot_timeout, market_data_type,
+                      app_factory=app_factory)
 
     # Aware UTC: a bare now() is local wall-clock time (Session G bug)
     t0 = datetime.datetime.now(datetime.timezone.utc)
@@ -819,219 +821,260 @@ def start_app(symbol='SPY', host='127.0.0.1', port=7497, client_id=36,
     return app
 
 
-def live_desktop_plot(app, ctxs=None, max_age=30.0, log_vol_series=None):
-    global plt, Button, ScalarFormatter, NullFormatter
+def _draw_frame(fig, ax, app, ctxs, max_age, z_grid, log_vol_series, state):
+    """
+    One frame of the dashboard. Every number comes from the same functions as before
+    (surface_points, audit_surface, svi.fit_slice, roughness, slice_density); only the
+    presentation is Session I's: the ui.theme dark tokens, one hue per entity, reference
+    lines in muted ink, and every state in the status line with an icon and a label.
+    """
+    import fit.svi as svi
+    from ui import theme as th
+    t = th.tokens("dark")
+    blue, orange = th.series(0, "dark"), th.series(1, "dark")
+    ax_3d, ax_skew, ax_rough, ax_dens = ax["3d"], ax["skew"], ax["rough"], ax["dens"]
+    pts = surface_points(app, ctxs, max_age)
+    taus, Z, exps = build_grid(pts, ctxs, z_grid)
+    if len(taus) < 2:
+        return False
+    status = []
+
+    # --- the surface: total variance, one hue for magnitude -------------------------
+    elev, azim = ax_3d.elev, ax_3d.azim
+    ax_3d.clear()
+    ax_3d.set_facecolor(t["surface"])
+    for pane in (ax_3d.xaxis.pane, ax_3d.yaxis.pane, ax_3d.zaxis.pane):
+        pane.set_facecolor(t["surface"])
+        pane.set_edgecolor(t["grid"])
+    X, Y = np.meshgrid(z_grid, np.array(taus) * 365.0)
+    # NaN renders as a hole. A gap in the market is a gap here.
+    ax_3d.plot_surface(X, Y, Z, cmap=th.sequential_cmap("dark"), edgecolor=t["surface"],
+                       lw=0.25, alpha=0.95, rstride=1, cstride=1)
+    ax_3d.set_xlabel("z = ln(K/F) / (σ√τ)", color=t["ink2"], fontsize=9, labelpad=6)
+    ax_3d.set_ylabel("τ (days)", color=t["ink2"], fontsize=9, labelpad=6)
+    ax_3d.set_zlabel("w = σ²τ", color=t["ink2"], fontsize=9, labelpad=6)
+    ax_3d.tick_params(colors=t["ink2"], labelsize=8)
+    ax_3d.set_title("Total variance surface", color=t["ink"], fontsize=11, loc="left", pad=4)
+    ax_3d.view_init(elev=elev, azim=azim)
+    n_quotes = sum(len(v) for v in pts.values())
+    holes = int(np.isnan(Z).sum())
+    # A1: static-arbitrage audit, reported not repaired
+    flags = audit_surface(pts, ctxs)
+    n_bf = sum(len(f['butterfly']) for f in flags.values())
+    n_cal = sum(len(f['calendar']) for f in flags.values())
+    status.append(("critical", f"static arbitrage: {n_bf} butterfly, {n_cal} calendar")
+                  if (n_bf or n_cal) else ("good", "no static arbitrage"))
+
+    # --- front slice, in sigma units, with a vega-weighted error bar ----------------
+    ax_skew.clear()
+    front = exps[0]
+    rows = pts[front]
+    fc = ctxs[front]
+    zs = [r['z'] for r in rows]
+    ivs = [r['iv'] for r in rows]
+    errs = [1.0 / np.sqrt(r['weight']) if r['weight'] > 0 else 0.0 for r in rows]
+    ax_skew.axvline(0, color=t["muted"], ls="--", lw=1)
+    ax_skew.errorbar(zs, ivs, yerr=errs, fmt='o', color=blue, ecolor=t["muted"], elinewidth=1,
+                     capsize=2, ms=5, mec=t["surface"], mew=1.0, label="quotes (±1/√weight)")
+    # A2: fit the slice, and draw the fit rather than joining dots
+    fit_p = svi.fit_slice([r['k'] for r in rows], [r['w'] for r in rows],
+                          weights=[r['weight'] for r in rows], tau=fc.tau)
+    if fit_p is not None:
+        kk = np.linspace(min(r['k'] for r in rows), max(r['k'] for r in rows), 200)
+        ww = svi.raw_svi(kk, **{p: fit_p[p] for p in svi.PARAM_NAMES})
+        zz = kk / (fc.sigma_atm * math.sqrt(fc.tau))
+        ax_skew.plot(zz, np.sqrt(np.maximum(ww, 1e-12) / fc.tau), '-', color=blue, lw=2.0, alpha=0.9,
+                     label=f"SVI fit (rmse {fit_p['rmse']:.1e})")
+        ok, wide = fit_p.get('durrleman'), fit_p.get('durrleman_wide')
+        if not ok:
+            status.append(("critical", "SVI: Durrleman condition violated"))
+        elif wide is False:
+            status.append(("warning", "SVI: wings unconstrained"))
+        else:
+            status.append(("good", "SVI: Durrleman holds"))
+    else:
+        status.append(("warning", "SVI: no fit on the front slice"))
+    # A1: mark the quotes the audit flagged
+    bad = [i for i in flags[front]['butterfly'] if 0 <= i < len(rows)]
+    if bad:
+        ax_skew.plot([rows[i]['z'] for i in bad], [rows[i]['iv'] for i in bad], 'x', color=th.STATUS["critical"],
+                     ms=9, mew=2, label="butterfly flag")
+    ax_skew.set_xlabel("z (σ from the forward)")
+    ax_skew.set_ylabel("implied vol")
+    ax_skew.set_title(f"Front slice {front}   F {fc.forward:.2f}   parity r² {fc.parity_r2:.3f}")
+    ax_skew.legend(loc="upper right")
+
+    # --- roughness: the log-log ATM skew slope is H - 1/2 ----------------------------
+    ax_rough.clear()
+    res, rt, rs, re = roughness(pts, ctxs)
+    if res is not None:
+        H, H_err, r2 = res
+        rt_d = np.array(rt) * 365.0
+        rs_a = np.abs(np.array(rs))
+        # Error bars come from the local fit, so a badly determined short-dated skew
+        # looks badly determined
+        yerr = np.array([e if (e is not None and np.isfinite(e)) else 0.0 for e in re])
+        ax_rough.errorbar(rt_d, rs_a, yerr=yerr, fmt='o', color=orange, ecolor=t["muted"], elinewidth=1,
+                          capsize=2, ms=6, mec=t["surface"], mew=1.0, label="ATM skew per expiry")
+        xs = np.linspace(min(rt), max(rt), 60)
+        # Anchor the line on the fitted intercept, not on one point
+        _, _, icpt, _ = vc.estimate_hurst(rt, rs, re)
+        ax_rough.plot(xs * 365.0, np.exp(icpt) * xs ** (H - 0.5), '-', color=orange, lw=2.0, alpha=0.85,
+                      label=f"τ^(H−½), H = {H:.3f}" + (f" ± {H_err:.3f}" if H_err else ""))
+        ax_rough.set_xscale('log')
+        ax_rough.set_yscale('log')
+        ax_rough.set_title(f"ATM skew term structure   Ĥ_skew {H:.3f}   r² {r2:.3f}")
+        ax_rough.legend(loc="upper right")
+        # A4: the second, independent estimate from the realised path
+        st = hurst_status(log_vol_series) if log_vol_series is not None else {'ready': False, 'H': None,
+                                                                               'needed': None}
+        if st['ready']:
+            agr = hurst_agreement(H, st['H'])
+            status.append(("good", f"Ĥ_skew and Ĥ_path agree (gap {agr['gap']:.3f})") if agr['agree']
+                          else ("warning", f"Ĥ_skew {H:.3f} and Ĥ_path {st['H']:.3f} diverge"))
+        else:
+            need = st.get('needed')
+            status.append((None, f"Ĥ_path: need {need} more samples" if need else "Ĥ_path: no history"))
+    else:
+        ax_rough.set_title("ATM skew term structure: needs 3+ expiries")
+    ax_rough.set_xlabel("τ (days)")
+    ax_rough.set_ylabel("|∂σ/∂k|")
+    # Default log minor labels collide over a narrow decade range
+    for axis in (ax_rough.xaxis, ax_rough.yaxis):
+        axis.set_major_formatter(ScalarFormatter())
+        axis.set_minor_formatter(NullFormatter())
+
+    # --- A3: risk-neutral density of the fitted front slice --------------------------
+    # Differentiated on a dense uniform grid, never on raw strikes -- fd_second loses
+    # an order on uneven spacing.
+    ax_dens.clear()
+    if fit_p is not None:
+        Kd, dens = slice_density(fit_p, fc.tau, fc.forward, fc.discount)
+        good = np.isfinite(dens)
+        mass = float(np.trapezoid(dens[good], Kd[good])) if good.any() else 0.0
+        neg = float(np.nanmin(dens)) if good.any() else 0.0
+        ax_dens.axhline(0.0, color=t["axis"], lw=0.8)
+        ax_dens.axvline(fc.forward, color=t["muted"], ls="--", lw=1)
+        ax_dens.fill_between(Kd[good], 0, dens[good], color=blue, alpha=0.18, lw=0)
+        ax_dens.plot(Kd[good], dens[good], '-', color=blue, lw=2.0)
+        if neg < -1e-10:
+            badd = good & (dens < 0)
+            ax_dens.plot(Kd[badd], dens[badd], 'o', color=th.STATUS["critical"], ms=4)
+            status.append(("critical", "density negative: butterfly arbitrage"))
+        else:
+            status.append(("good", f"density non-negative, ∫ = {mass:.4f}"))
+        ax_dens.set_xlim(fc.forward * 0.75, fc.forward * 1.25)
+        ax_dens.set_title(f"Risk-neutral density, {front}")
+    else:
+        ax_dens.set_title("Risk-neutral density: no SVI fit")
+    ax_dens.set_xlabel("strike")
+    ax_dens.set_ylabel("q(K)")
+
+    # --- header and status line --------------------------------------------------------
+    for art in state.get("chrome", []):
+        art.remove()
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%H:%M:%S UTC")
+    mdt = {1: "live", 2: "frozen", 3: "delayed", 4: "delayed-frozen"}.get(getattr(app, "market_data_type", 1), "live")
+    title = fig.text(0.012, 0.965, f"{getattr(app, '_symbol', 'SPY')}  ·  live volatility surface",
+                     color=t["ink"], fontsize=15, fontweight="semibold", va="baseline")
+    sub = fig.text(0.012, 0.94, f"updated {now}   ·   {n_quotes} usable quotes on {len(exps)} expiries   "
+                                f"·   {holes} grid holes, not filled   ·   market data: {mdt}"
+                                + ("   ·   LOCKED" if state["locked"] else ""),
+                   color=t["ink2"], fontsize=9.5, va="baseline")
+    bar = th.status_line(fig, status, x=0.012, y=0.015, mode="dark", fontsize=9.5)
+    state["chrome"] = [title, sub, bar]
+    state["status"] = status
+    return True
+
+
+def live_desktop_plot(app, ctxs=None, max_age=30.0, log_vol_series=None, frames=None, save=None):
+    """
+    The live dashboard. frames / save (Session I): draw that many frames, write the last
+    one to `save` as a PNG and return -- for an offline demo (--demo) or a check.
+    Keys: L locks the view, S saves a snapshot to captures/live/.
+    """
+    global plt, ScalarFormatter, NullFormatter
+    import matplotlib
+    if save and frames:
+        matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.ticker import NullFormatter, ScalarFormatter
-    from matplotlib.widgets import Button
-    import fit.svi as svi
-    plt.style.use('dark_background')
+    from ui import theme as th
+    t = th.apply("dark")
 
     if log_vol_series is None:
         log_vol_series = getattr(app, 'log_vol_history', None)
 
     ctxs = ctxs if ctxs is not None else app.ctxs
-    plt.ion()
+    if not (save and frames):
+        plt.ion()
     fig = plt.figure(figsize=(18, 11))
-    fig.canvas.manager.set_window_title('Live Volatility Surface v3')
-    fig.patch.set_facecolor('#0b0d0f')
+    try:
+        fig.canvas.manager.set_window_title('Live volatility surface')
+    except AttributeError:
+        pass
+    ax = {"3d": plt.subplot2grid((3, 3), (0, 0), rowspan=3, colspan=2, projection='3d'),
+          "skew": plt.subplot2grid((3, 3), (0, 2)),
+          "rough": plt.subplot2grid((3, 3), (1, 2)),
+          "dens": plt.subplot2grid((3, 3), (2, 2))}
+    fig.subplots_adjust(left=0.01, right=0.975, top=0.9, bottom=0.08, hspace=0.62, wspace=0.22)
+    state = {"locked": False, "chrome": []}
+    snap_dir = pathlib.Path(__file__).parent / "captures" / "live"
+    # matplotlib binds 's' to its save dialog and 'l' / 'L' / 'k' to log axes: release them,
+    # or one key press would do two things
+    for km, drop in (("keymap.save", ("s",)), ("keymap.yscale", ("l",)), ("keymap.xscale", ("k", "L"))):
+        plt.rcParams[km] = [k for k in plt.rcParams[km] if k not in drop]
 
-    ax_3d = plt.subplot2grid((3, 3), (0, 0), rowspan=3, colspan=2, projection='3d')
-    ax_skew = plt.subplot2grid((3, 3), (0, 2))
-    ax_rough = plt.subplot2grid((3, 3), (1, 2))
-    ax_dens = plt.subplot2grid((3, 3), (2, 2))
-    fig.subplots_adjust(left=0.01, right=0.975, top=0.93, bottom=0.08,
-                        hspace=0.55, wspace=0.22)
+    from matplotlib.widgets import Button
+    buttons = {}
+    for key, rect, label in (("lock", [0.845, 0.009, 0.062, 0.032], "Lock  (L)"),
+                             ("snap", [0.912, 0.009, 0.076, 0.032], "Snapshot  (S)")):
+        b = Button(fig.add_axes(rect), label, color=t["surface"], hovercolor=t["grid"])
+        b.label.set_color(t["ink"])
+        b.label.set_fontsize(9)
+        for sp in b.ax.spines.values():
+            sp.set_visible(True)
+            sp.set_edgecolor(t["axis"])
+        buttons[key] = b
+    state["buttons"] = buttons            # widgets must stay referenced to stay live
 
-    ax_button = plt.axes([0.45, 0.01, 0.10, 0.035])
-    btn = Button(ax_button, 'LOCK', color='#1f2329', hovercolor='#2d333b')
-    btn.label.set_color('white')
-    state = {'locked': False}
+    def toggle(_=None):
+        state["locked"] = not state["locked"]
+        buttons["lock"].label.set_text("Unlock  (L)" if state["locked"] else "Lock  (L)")
+        print("view locked" if state["locked"] else "view unlocked")
+        fig.canvas.draw_idle()
 
-    def toggle(_):
-        state['locked'] = not state['locked']
-        btn.label.set_text('UNLOCK' if state['locked'] else 'LOCK')
-        plt.draw()
+    def snapshot(_=None):
+        snap_dir.mkdir(parents=True, exist_ok=True)
+        path = snap_dir / f"surface_{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%SZ}.png"
+        fig.savefig(path, dpi=120)
+        print(f"snapshot saved: {path}")
 
-    btn.on_clicked(toggle)
+    def on_key(event):
+        if event.key in ("l", "L"):
+            toggle()
+        elif event.key in ("s", "S"):
+            snapshot()
 
+    buttons["lock"].on_clicked(toggle)
+    buttons["snap"].on_clicked(snapshot)
+    fig.canvas.mpl_connect("key_press_event", on_key)
     z_grid = np.linspace(-N_SIGMA_BAND, N_SIGMA_BAND, 41)
-    print("--- v3 live ---")
-
+    print("--- live dashboard (L lock, S snapshot, Ctrl+C quit) ---")
+    drawn = 0
     try:
         while True:
-            if not state['locked']:
-                pts = surface_points(app, ctxs, max_age)
-                taus, Z, exps = build_grid(pts, ctxs, z_grid)
-
-                if len(taus) >= 2:
-                    elev, azim = ax_3d.elev, ax_3d.azim
-                    ax_3d.clear()
-                    ax_3d.set_facecolor('#0b0d0f')
-                    X, Y = np.meshgrid(z_grid, np.array(taus) * 365.0)
-                    # NaN renders as a hole. A gap in the market is a gap here.
-                    ax_3d.plot_surface(X, Y, Z, cmap='magma', edgecolor='white',
-                                       lw=0.15, alpha=0.92, rstride=1, cstride=1)
-                    ax_3d.set_xlabel('z  =  ln(K/F) / (σ√τ)', color='#9aa4b2', fontsize=9)
-                    ax_3d.set_ylabel('τ  (days)', color='#9aa4b2', fontsize=9)
-                    ax_3d.set_zlabel('w  =  σ²τ', color='#9aa4b2', fontsize=9)
-                    n = sum(len(v) for v in pts.values())
-                    holes = int(np.isnan(Z).sum())
-                    # A1: static-arbitrage audit, reported not repaired
-                    flags = audit_surface(pts, ctxs)
-                    n_bf = sum(len(f['butterfly']) for f in flags.values())
-                    n_cal = sum(len(f['calendar']) for f in flags.values())
-                    ax_3d.set_title(
-                        f"TOTAL VARIANCE   w = σ²τ      {time.strftime('%H:%M:%S')}",
-                        color='white', fontsize=11, pad=6)
-                    arb = (f"{n_bf} butterfly, {n_cal} calendar"
-                           if (n_bf or n_cal) else "clean")
-                    ax_3d.text2D(
-                        0.01, 0.97,
-                        f"{n} usable quotes   ·   {holes} grid holes (not filled)\n"
-                        f"static arbitrage: {arb}",
-                        transform=ax_3d.transAxes, fontsize=8, va='top',
-                        color='#ff8a8a' if (n_bf or n_cal) else '#7ee787')
-                    ax_3d.view_init(elev=elev, azim=azim)
-
-                    # Front slice, in sigma units, with a vega-weighted error bar
-                    ax_skew.clear()
-                    ax_skew.set_facecolor('#161b22')
-                    front = exps[0]
-                    rows = pts[front]
-                    zs = [r['z'] for r in rows]
-                    ivs = [r['iv'] for r in rows]
-                    errs = [1.0 / np.sqrt(r['weight']) if r['weight'] > 0 else 0.0
-                            for r in rows]
-                    ax_skew.errorbar(zs, ivs, yerr=errs, fmt='o', color='#00f2ff',
-                                     ecolor='#3a4553', elinewidth=1, capsize=2, ms=3)
-
-                    # A2: fit the slice, and draw the fit rather than joining dots
-                    fc = ctxs[front]
-                    fit_p = svi.fit_slice([r['k'] for r in rows],
-                                          [r['w'] for r in rows],
-                                          weights=[r['weight'] for r in rows],
-                                          tau=fc.tau)
-                    fit_txt = ""
-                    if fit_p is not None:
-                        kk = np.linspace(min(r['k'] for r in rows),
-                                         max(r['k'] for r in rows), 200)
-                        ww = svi.raw_svi(kk, **{p: fit_p[p] for p in svi.PARAM_NAMES})
-                        zz = kk / (fc.sigma_atm * math.sqrt(fc.tau))
-                        ax_skew.plot(zz, np.sqrt(np.maximum(ww, 1e-12) / fc.tau),
-                                     '-', color='#00f2ff', lw=1.2, alpha=0.8)
-                        ok = fit_p.get('durrleman')
-                        wide = fit_p.get('durrleman_wide')
-                        tag = "" if ok else "  ⚠ Durrleman"
-                        if ok and wide is False:
-                            tag = "  (wings unconstrained)"
-                        fit_txt = f"  |  SVI rmse {fit_p['rmse']:.2e}{tag}"
-
-                    # A1: mark the quotes the audit flagged
-                    for i in flags[front]['butterfly']:
-                        if 0 <= i < len(rows):
-                            ax_skew.plot(rows[i]['z'], rows[i]['iv'], 'x',
-                                         color='#ff3e3e', ms=9, mew=2)
-
-                    ax_skew.axvline(0, color='#ff3e3e', ls='--', lw=1)
-                    ax_skew.set_xlabel('z  (σ from forward)', color='#9aa4b2', fontsize=8)
-                    ax_skew.set_ylabel('implied vol', color='#9aa4b2', fontsize=8)
-                    ax_skew.set_title(
-                        f"FRONT SLICE {front}   F={fc.forward:.2f} "
-                        f"(parity r²={fc.parity_r2:.3f}){fit_txt}",
-                        color='white', fontsize=8, pad=4)
-
-                    # Roughness: the log-log ATM skew slope is H - 1/2
-                    ax_rough.clear()
-                    ax_rough.set_facecolor('#161b22')
-                    res, rt, rs, re = roughness(pts, ctxs)
-                    if res is not None:
-                        H, H_err, r2 = res
-                        rt_d = np.array(rt) * 365.0
-                        rs_a = np.abs(np.array(rs))
-                        # Error bars come from the local fit, so a badly
-                        # determined short-dated skew looks badly determined
-                        yerr = np.array([e if (e is not None and np.isfinite(e)) else 0.0
-                                         for e in re])
-                        ax_rough.errorbar(rt_d, rs_a, yerr=yerr, fmt='o', color='#ffb020',
-                                          ecolor='#6b5320', elinewidth=1.2, capsize=2, ms=5)
-                        xs = np.linspace(min(rt), max(rt), 60)
-                        # Anchor the line on the fitted intercept, not on one point
-                        _, _, icpt, _ = vc.estimate_hurst(rt, rs, re)
-                        fit = np.exp(icpt) * xs ** (H - 0.5)
-                        ax_rough.plot(xs * 365.0, fit, '-', color='#ffb020', lw=1.3, alpha=0.75)
-                        ax_rough.set_xscale('log')
-                        ax_rough.set_yscale('log')
-                        err_txt = f" ± {H_err:.3f}" if H_err else ""
-
-                        # A4: the second, independent estimate from the realised path
-                        st = hurst_status(log_vol_series) if log_vol_series is not None \
-                            else {'ready': False, 'H': None, 'needed': None}
-                        if st['ready']:
-                            agr = hurst_agreement(H, st['H'])
-                            mark = "✓" if agr['agree'] else "⚠ diverge"
-                            second = (f"   Ĥ_path = {st['H']:.3f}  "
-                                      f"(gap {agr['gap']:.3f} {mark})")
-                            colour = 'white' if agr['agree'] else '#ffb020'
-                        else:
-                            need = st.get('needed')
-                            second = (f"   Ĥ_path: need {need} more samples"
-                                      if need else "   Ĥ_path: no history")
-                            colour = 'white'
-
-                        ax_rough.set_title(
-                            f"Ĥ_skew = {H:.3f}{err_txt}  r²={r2:.3f}" + second,
-                            color=colour, fontsize=8, pad=4)
-                        ax_rough.text(
-                            0.03, 0.06,
-                            f"ATM skew ~ τ^(H-½), local fit |z|≤{ATM_WINDOW_Z:g}σ\n"
-                            f"H<½ rough · H=½ classical",
-                            transform=ax_rough.transAxes, color='#6b7684', fontsize=7,
-                            va='bottom')
-                    else:
-                        ax_rough.set_title("ATM SKEW -- need 3+ expiries",
-                                           color='#9aa4b2', fontsize=9)
-                    ax_rough.set_xlabel('τ (days)', color='#9aa4b2', fontsize=8)
-                    ax_rough.set_ylabel('|∂σ/∂k|', color='#9aa4b2', fontsize=8)
-                    # Default log minor labels collide over a narrow decade range
-                    for axis in (ax_rough.xaxis, ax_rough.yaxis):
-                        axis.set_major_formatter(ScalarFormatter())
-                        axis.set_minor_formatter(NullFormatter())
-                    ax_rough.tick_params(labelsize=7)
-
-                    # A3: risk-neutral density of the fitted front slice.
-                    # Differentiated on a dense uniform grid, never on raw
-                    # strikes -- fd_second loses an order on uneven spacing.
-                    ax_dens.clear()
-                    ax_dens.set_facecolor('#161b22')
-                    if fit_p is not None:
-                        Kd, dens = slice_density(fit_p, fc.tau, fc.forward, fc.discount)
-                        good = np.isfinite(dens)
-                        mass = float(np.trapezoid(dens[good], Kd[good])) if good.any() else 0.0
-                        neg = float(np.nanmin(dens)) if good.any() else 0.0
-                        ax_dens.plot(Kd[good], dens[good], '-', color='#7ee787', lw=1.2)
-                        ax_dens.fill_between(Kd[good], 0, dens[good],
-                                             color='#7ee787', alpha=0.15)
-                        if neg < -1e-10:
-                            bad = good & (dens < 0)
-                            ax_dens.plot(Kd[bad], dens[bad], 'o', color='#ff3e3e', ms=3)
-                        ax_dens.axvline(fc.forward, color='#ff3e3e', ls='--', lw=1)
-                        ax_dens.axhline(0.0, color='#3a4553', lw=0.8)
-                        state_txt = ("NEGATIVE — butterfly arbitrage"
-                                     if neg < -1e-10 else "non-negative")
-                        ax_dens.set_title(
-                            f"RISK-NEUTRAL DENSITY  |  ∫={mass:.4f}  |  {state_txt}",
-                            color='#ff3e3e' if neg < -1e-10 else 'white',
-                            fontsize=8, pad=4)
-                        ax_dens.set_xlim(fc.forward * 0.75, fc.forward * 1.25)
-                    else:
-                        ax_dens.set_title("RISK-NEUTRAL DENSITY -- no SVI fit",
-                                          color='#9aa4b2', fontsize=8, pad=4)
-                    ax_dens.set_xlabel('strike', color='#9aa4b2', fontsize=8)
-                    ax_dens.set_ylabel('q(K)', color='#9aa4b2', fontsize=8)
-                    ax_dens.tick_params(labelsize=7)
-
-            plt.pause(0.5)
+            if not state["locked"]:
+                if _draw_frame(fig, ax, app, ctxs, max_age, z_grid, log_vol_series, state):
+                    drawn += 1
+            if save and frames:
+                if drawn >= frames:
+                    fig.savefig(save, dpi=110)
+                    plt.close(fig)
+                    return state.get("status", [])
+                time.sleep(0.5)
+            else:
+                plt.pause(0.5)
 
     except KeyboardInterrupt:
         print("\nShutting down...")
@@ -1047,12 +1090,31 @@ def live_desktop_plot(app, ctxs=None, max_age=30.0, log_vol_series=None):
         plt.close()
 
 
+def _demo_app(target_days):
+    """The fake TWS of the tests, for the dashboard without IB Gateway (--demo)."""
+    import fake_ib
+    RateLimiter.acquire = lambda self: None
+    global probe_tws
+    probe_tws = lambda *a, **k: True
+    today = vc.new_york_date(datetime.datetime.now(datetime.timezone.utc))
+    cls = fake_ib.make_fake(LiveSurfaceApp, today=today)
+    return start_app('SPY', port=4001, app_factory=cls, spot_timeout=2.0, target_days=target_days)
+
+
 if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser(description="Live SPY volatility surface (TWS / IB Gateway), or --demo offline.")
+    ap.add_argument("--port", type=int, default=7497, help="7497 TWS paper, 7496 TWS live, 4001/4002 Gateway")
+    ap.add_argument("--demo", action="store_true", help="no TWS: the tests' fake market, priced from a rough smile")
+    ap.add_argument("--frames", type=int, default=None, help="with --save: draw this many frames, then exit")
+    ap.add_argument("--save", default=None, help="write the last frame to this PNG")
+    args = ap.parse_args()
+    targets = (2, 5, 10, 21, 45, 90, 180, 365)
     try:
-        instance = start_app('SPY')
+        instance = _demo_app(targets) if args.demo else start_app('SPY', port=args.port)
     except ConnectionError_ as exc:
         print(f"\nStartup failed: {exc}")
         raise SystemExit(1)
     print("App Started")
-    time.sleep(10)
-    live_desktop_plot(instance)
+    time.sleep(3 if args.demo else 10)
+    live_desktop_plot(instance, frames=args.frames, save=args.save)
