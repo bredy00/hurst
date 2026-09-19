@@ -35,10 +35,43 @@ ROOT = pathlib.Path(__file__).parent
 RESULTS = []
 
 
-def record(group, name, measured, threshold, ok, unit="", note=""):
+def record(group, name, measured, threshold, ok, unit="", note="", trend=True):
     RESULTS.append({"group": group, "name": name, "measured": measured,
                     "threshold": threshold, "ok": bool(ok), "unit": unit,
-                    "note": note})
+                    "note": note, "trend": bool(trend)})
+
+
+THROTTLE = 1.5          # reference workload this much slower than the machine's median: throttled
+
+
+def cpu_reference():
+    """
+    A fixed CPU-bound workload shaped like the objective (small dense products and complex
+    exponentials), best of three, in seconds. Session I: the analytics review measured a
+    sustained load throttling this laptop by 67%, and the rough objective then read 3.3 s
+    instead of 0.7-1.1 s; the reference is what tells a slow machine from slow code.
+    """
+    rng = np.random.default_rng(0)
+    A = rng.standard_normal((80, 80))
+    X = rng.standard_normal((80, 1200))
+    Z = 0.01 * (rng.standard_normal((40, 600)) + 1j * rng.standard_normal((40, 600)))
+    best = float("inf")
+    for _ in range(3):
+        t0 = time.perf_counter()
+        acc = 0.0
+        for _ in range(150):
+            acc += float((A @ X)[0, 0]) + float(np.exp(Z)[0, 0].real)
+        best = min(best, time.perf_counter() - t0)
+    return best
+
+
+def throttle_ratio(ref_seconds, name="CPU reference workload"):
+    """This run's reference time over this machine's median of earlier runs; (1.0, n) with < 3 runs."""
+    here = machine_key()
+    vals = [r["measured"][name] for r in load_history() if r.get("host") == here and name in r["measured"]]
+    if len(vals) < 3:
+        return 1.0, len(vals)
+    return ref_seconds / float(np.median(vals)), len(vals)
 
 
 def fmt(x):
@@ -415,17 +448,19 @@ def h_lift():
     from models.heston import char_func as hcf
     e_day, _ = rh.kernel_error(0.12)
     e_hour, _ = rh.kernel_error(0.12, t_lo=1 / (365 * 24))
-    record("Markovian lift", f"kernel error, N={rh.N_DEFAULT}, t in [1 day, 2 y]", e_day, 0.01,
-           e_day < 0.01, unit="rel", note="max relative; H = 0.12")
+    lift = f"N = {rh.N_DEFAULT}, top node {rh.ETA_N_DEFAULT:.0e}/y"
+    record("Markovian lift", "kernel error of the default lift, t in [1 day, 2 y]", e_day, 0.01,
+           e_day < 0.01, unit="rel", note=f"max relative; H = 0.12; {lift}")
     record("Markovian lift", "kernel error on [1 hour, 2 y]", e_hour, 0.01, e_hour < 0.01,
-           unit="rel", note="a one-day option lives here; 12% below 5 minutes")
-    hs = np.linspace(0.08, 0.5, 22)
-    e24 = max(rh.kernel_error(h, 24)[0] for h in hs)
-    record("Markovian lift", "kernel error, N=24, worst over H in [0.08, 0.5]", e24, 0.01, e24 < 0.01,
-           unit="rel", note=f"H = 0.05: {rh.kernel_error(0.05, 24)[0]:.4f}, H = 0.02: {rh.kernel_error(0.02, 24)[0]:.4f} -- above 1%")
-    e32 = max(rh.kernel_error(h, 32)[0] for h in np.linspace(0.02, 0.5, 25))
-    record("Markovian lift", "kernel error, N=32, worst over the whole H box [0.02, 0.5]", e32, 0.01,
-           e32 < 0.01, unit="rel", note="what calibration refits with when a fit lands below H = 0.08")
+           unit="rel", note="a one-day option lives here")
+    e5 = rh.kernel_error(0.12, t_lo=5 / (365 * 24 * 60))[0]
+    record("Markovian lift", "kernel error on [5 minutes, 2 y]", e5, 0.01, e5 < 0.01, unit="rel",
+           note="the shipped N = 24 lift was 12% off here (Sessions D-H)")
+    box = np.linspace(0.02, 0.5, 25)
+    for lab, t_lo in (("1 day", 1 / 365), ("1 hour", 1 / (365 * 24))):
+        worst = max(rh.kernel_error(h, t_lo=t_lo)[0] for h in box)
+        record("Markovian lift", f"kernel error of the default lift, worst over H in [0.02, 0.5], [{lab}, 2 y]",
+               worst, 0.01, worst < 0.01, unit="rel", note="the calibration box; no refinement needed (Session I)")
     w, x = rh.lift_nodes(0.12)
     z = np.exp(np.linspace(math.log(0.1), math.log(100), 200))
     lap = float(np.max(np.abs(rh.laplace_approx(z, w, x) - rh.laplace_kernel(z, 0.12))
@@ -491,9 +526,19 @@ def h_lift():
             rh.call_prices(np.linspace(-band, band, 13), tau, Pr)
         runs.append(time.perf_counter() - t0)
     dt_obj = min(runs)
+    ref = cpu_reference()
+    ratio, n_ref = throttle_ratio(ref)
+    throttled = ratio > THROTTLE
+    record("Engineering", "CPU reference workload", ref, float("inf"), True, unit="s",
+           note=f"best of 3; {ratio:.2f}x this machine's median over {n_ref} earlier runs"
+           + (" -- THROTTLED" if throttled else ""))
+    # A throttled run is judged on its speed-normalised time and kept out of the timing trend
+    # (the rolling-mean target is for this machine at its normal speed).
+    judged = dt_obj / ratio if throttled else dt_obj
     record("Markovian lift", "rough objective evaluation, 10 expiries x 13 strikes", dt_obj, 3.0,
-           dt_obj < 3.0, unit="s", note=f"best of 3 (all: {', '.join(f'{r:.2f}' for r in runs)}); "
-           "trend target: rolling mean <= 0.75 s")
+           judged < 3.0, unit="s", trend=not throttled,
+           note=f"best of 3 (all: {', '.join(f'{r:.2f}' for r in runs)}); trend target: rolling mean <= 0.75 s"
+           + (f"; THROTTLED {ratio:.2f}x: judged at {judged:.2f} s, not added to the trend" if throttled else ""))
 
 
 # ------------------------------------------------------------- Session E
@@ -597,14 +642,21 @@ def h_hawkes():
     dt = 1.0 / 1008
     hosts = [(jh.OUHost(kappa=3.0, theta=math.log(0.04), sigma=1.0), jh.JumpSizes(state_mean=0.05)),
              (jh.HestonHost(kappa=3.0, theta=0.04, xi=0.3), jh.JumpSizes(state_mean=0.01)),
-             (jh.RoughHost(jump_mode="driver"), jh.JumpSizes(state_mean=0.002)),
-             (jh.RoughHost(jump_mode="direct"), jh.JumpSizes(state_mean=0.01))]
+             (jh.RoughHost(), jh.JumpSizes(state_mean=0.017))]      # driver only, sized by impact (Session I)
     err = 0.0
     for host, J in hosts:
         a = jh.second_spike(host, Hp, J, dt, 20, 8)
         err = max(err, abs((a["inc2"] - a["inc1"]) - (a["r_dW"] - a["r_d"])))
-    record("Hawkes", "second spike: superposition identity, 4 hosts", err, 1e-12, err < 1e-12,
-           note="inc2 - inc1 = r(d+W) - r(d)")
+    record("Hawkes", "second spike: superposition identity, every host", err, 1e-12, err < 1e-12,
+           note="inc2 - inc1 = r(d+W) - r(d); OU, Heston, rough (the direct rough mode was retired in Session I)")
+    # a rough jump's size is its integrated variance impact: realised over the first day at 5-minute steps
+    quiet = hk.HawkesParams.poisson(1e-9)
+    rough = jh.RoughHost()
+    d5 = (1.0 / 252) / 78
+    r5 = jh.shock_response(rough, quiet, jh.JumpSizes(state_mean=0.02), 81 * d5, 81, 2)[3:]
+    got = float(np.sum(r5[:78]) * d5 * 252) / 0.02
+    record("Hawkes", "rough jump: realised 1-day impact / its parameter, 5-minute steps", abs(got - 1.0), 0.05,
+           abs(got - 1.0) < 0.05, note=f"ratio {got:.4f}; the parameter is the average extra variance over the first day")
     host, J = hosts[1]
     up = jh.second_spike(host, hk.HawkesParams(5.0, 3.09, 3.09 / 0.6), J, dt, 2, 1)
     dn = jh.second_spike(host, hk.HawkesParams(5.0, 2.91, 2.91 / 0.6), J, dt, 2, 1)
@@ -685,7 +737,7 @@ def h_kalman():
     impr = 1 - math.sqrt(float(np.mean((rr["estimate"][100:] - V[100:]) ** 2))) / \
         math.sqrt(float(np.mean((yv[100:] - V[100:]) ** 2)))
     record("Kalman", "lifted rough filter: RMSE improvement over quotes", impr * 100, 30.0, impr > 0.30,
-           unit="%", note="24 lifted factors as the state, rank-one Q")
+           unit="%", note="the lifted factors (40 on the default lift) as the state, rank-one Q")
 
 
 # ------------------------------------------------------------- Session G
@@ -710,7 +762,7 @@ def h_recording():
 def h_positivity():
     import models.rough_heston as rh
     import filters.kalman as kf
-    w, x = rh.lift_nodes(0.12, 24)
+    w, x = rh.lift_nodes(0.12)
     st = rh.LiftedAffineStep(w, x, 0.04, 3.0, 0.04, 0.3, 1 / 252)
     U_star = st.U_from_y(st.y_star[:, None])[:, 0]
     g = rh._phi1(-x / 252)
@@ -758,16 +810,16 @@ def h_lift_fidelity():
     lift = fo.implied_vols_from_calls(ad.lewis_prices_from_logcf(ks, lambda z: rh.log_char_func(z, tau, Pr, steps_mult=2.0), um),
                                       ks, tau)
     err = float(np.max(np.abs(lift - ref))) * 100
-    record("Lift fidelity (Session G)", "7-day IV, lift N=24 vs true rough Heston (fractional Adams)", err, 0.1,
-           err < 0.1, unit="vp", note="1 day: 0.15 vp, skew -1.6% (study_lewis_isometry.py)")
-    w, x = rh.lift_nodes(0.12, 24)
+    record("Lift fidelity (Session G)", "7-day IV, default lift vs true rough Heston (fractional Adams)", err, 0.05,
+           err < 0.05, unit="vp", note="N = 24 was 0.063 at 7 d, 0.148 at 1 d; N = 40 0.030 and 0.034 (study_finer_lift.py)")
+    w, x = rh.lift_nodes(0.12)
     t = 1 / 365
     r = x[:, None] + x[None, :]
     iso_lift = float((np.outer(w, w) * (-np.expm1(-r * t)) / r).sum())
     iso_true = t ** 0.24 / (0.24 * math.gamma(0.62) ** 2)
     gap = 100 * (1 - iso_lift / iso_true)
-    record("Lift fidelity (Session G)", "Ito isometry of the lift at 1 day, shortfall vs true kernel", gap, 25.0,
-           gap < 25.0, unit="%", note="93% of it from lags under 7 minutes; prices integrate it away")
+    record("Lift fidelity (Session G)", "Ito isometry of the lift at 1 day, shortfall vs true kernel", gap, 8.0,
+           gap < 8.0, unit="%", note="21.6% on the N = 24 lift (its top node cut the kernel below 7 minutes); 5.1% now")
 
 
 def h_weighting():
@@ -813,10 +865,10 @@ def h_zero_boundary():
     import filters.kalman as kf
     import filters.particle as pfm
     G = "Zero boundary (Session H)"
-    w, x = rh.lift_nodes(0.12, 24)
+    w, x = rh.lift_nodes(0.12)
     st = rh.LiftedAffineStep(w, x, 0.04, 3.0, 0.04, 0.3, 1 / 252)
     A, b = st.transition_U()
-    U = st.U_from_y(st.y_star[:, None])[:, 0] + 0.002 * np.random.default_rng(0).standard_normal(24)
+    U = st.U_from_y(st.y_star[:, None])[:, 0] + 0.002 * np.random.default_rng(0).standard_normal(len(w))
     dz = 1e-3
     z = np.array([-dz, 0.0, dz])
     a, B = ff.variance_cf_coefficients(z, 1 / 252, w, x, 0.04, 3.0, 0.04, 0.3)
@@ -857,6 +909,12 @@ def h_clock():
              (DT(2026, 10, 30, 12, 0), D(2027, 3, 19))]
     worst = max(abs(vc.variance_time(t, e, 1.0) / vc.tau_years(t, e) - 1) for t, e in pairs)
     record(G, "variance time at omega = 1 vs ACT/365", worst, 1e-12, worst < 1e-12, unit="rel")
+    split_h = [x / 3600.0 for x in vc.reference_year_split()]
+    want = (1622.5, 3412.5, 3725.0)
+    off = max(abs(a - b) for a, b in zip(split_h, want))
+    record(G, "2025 reference split: session / overnight / weekend-holiday hours", off, 1e-9, off < 1e-9,
+           unit="h", note=f"{split_h[0]:g} / {split_h[1]:g} / {split_h[2]:g} h (sum {sum(split_h):g} = 365 x 24); "
+           "by rule: the one-off closure of 9 Jan 2025 is not modelled")
     published = {D(2026, 1, 1), D(2026, 1, 19), D(2026, 2, 16), D(2026, 4, 3), D(2026, 5, 25), D(2026, 6, 19),
                  D(2026, 7, 3), D(2026, 9, 7), D(2026, 11, 26), D(2026, 12, 25)}
     miss = len(published ^ set(vc.nyse_holidays(2026)))
@@ -1039,8 +1097,13 @@ TREND_RULES = {
     "rough objective evaluation, 10 expiries x 13 strikes": {"mean_max": 0.75, "window": 10,
                                                              "same_host": True},
     "recursive MLE (Ljung) distance from the MLE": {"max_max": 2.0, "window": 20},
-    "kernel error, N=24, t in [1 day, 2 y]": {"max_max": 0.01},
+    "kernel error of the default lift, t in [1 day, 2 y]": {"max_max": 0.01},
     "kernel error on [1 hour, 2 y]": {"max_max": 0.01},
+    "kernel error of the default lift, worst over H in [0.02, 0.5], [1 day, 2 y]": {"max_max": 0.01},
+    "kernel error of the default lift, worst over H in [0.02, 0.5], [1 hour, 2 y]": {"max_max": 0.01},
+    # Session I (analytics review of 2026-09-18): the clock's identities must hold on every run
+    "variance time at omega = 1 vs ACT/365": {"max_max": 1e-12},
+    "2025 reference split: session / overnight / weekend-holiday hours": {"max_max": 1e-9},
 }
 
 
@@ -1072,7 +1135,7 @@ def append_history(seconds):
            "n_ok": sum(1 for r in RESULTS if r["ok"]), "n": len(RESULTS),
            "measured": {r["name"]: r["measured"] for r in RESULTS
                         if isinstance(r["measured"], (int, float, np.integer, np.floating))
-                        and np.isfinite(r["measured"])}}
+                        and np.isfinite(r["measured"]) and r.get("trend", True)}}
     with HISTORY.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row) + "\n")
 
