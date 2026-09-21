@@ -3,21 +3,21 @@
   {
    "group": "Engineering",
    "name": "CPU reference workload",
-   "measured": 0.23824810000951402,
+   "measured": 0.41022660001181066,
    "threshold": Infinity,
    "ok": true,
    "unit": "s",
-   "note": "best of 3; 1.00x this machine's median over 1 earlier runs",
+   "note": "best of 3; 1.09x this machine's median over 3 earlier runs",
    "trend": true
   },
   {
    "group": "Markovian lift",
    "name": "rough objective evaluation, 10 expiries x 13 strikes",
-   "measured": 0.460292899995693,
+   "measured": 0.7777814000146464,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
-   "note": "best of 3 (all: 0.46, 0.46, 0.46); trend target: rolling mean <= 0.75 s",
+   "note": "best of 3 (all: 0.80, 0.79, 0.78); trend target: rolling mean <= 0.75 s",
    "trend": true
   },
   {
@@ -1163,7 +1163,7 @@
   {
    "group": "Engineering",
    "name": "startup to actionable error, no TWS",
-   "measured": 0.5570989999978337,
+   "measured": 0.9470613999874331,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
@@ -1173,7 +1173,7 @@
   {
    "group": "Engineering",
    "name": "calibration objective evaluation",
-   "measured": 8.896979998098686,
+   "measured": 15.630739997141061,
    "threshold": 200.0,
    "ok": true,
    "unit": "ms",
@@ -1211,7 +1211,7 @@
    "trend": true
   }
  ],
- "seconds": 125.01098689998616,
+ "seconds": 176.2753018999938,
  "python": "3.12.3",
  "numpy": "2.5.2"
 }
