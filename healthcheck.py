@@ -65,13 +65,23 @@ def cpu_reference():
     return best
 
 
-def throttle_ratio(ref_seconds, name="CPU reference workload"):
-    """This run's reference time over this machine's median of earlier runs; (1.0, n) with < 3 runs."""
+def throttle_ratio(ref_seconds, name="CPU reference workload", window=20):
+    """
+    This run's reference time over the FASTEST of the last `window` runs on this machine;
+    (1.0, n) when there is no earlier run.
+
+    The baseline was the median until Session K, and that could not work: the median of a
+    handful of runs includes the throttled ones, so a machine running at 58% of its own
+    best speed read 0.97-1.09x and its timings went into the trend as if they were clean
+    (21 September, twice). Hardware does not run faster than its own maximum, so the
+    fastest recent run is the honest estimate of an unthrottled machine.
+    """
     here = machine_key()
     vals = [r["measured"][name] for r in load_history() if r.get("host") == here and name in r["measured"]]
-    if len(vals) < 3:
-        return 1.0, len(vals)
-    return ref_seconds / float(np.median(vals)), len(vals)
+    vals = [v for v in vals[-window:] if v > 0]
+    if not vals:
+        return 1.0, 0
+    return ref_seconds / float(np.min(vals)), len(vals)
 
 
 def fmt(x):
@@ -513,10 +523,13 @@ def h_lift():
         um = rh.u_max_for(Pr, tau)
         u2 = np.linspace(0.0, um, 300) - 2.5j
         a = rh.char_func(u2, tau, Pr, scheme="etdrk4", steps_mult=2.0)
-        b = rh.char_func(u2, tau, Pr, scheme="exptrap", steps=200, richardson=True)
+        b = rh.char_func(u2, tau, Pr, scheme="exptrap", steps=800, richardson=True)
         worst = max(worst, float(np.max(np.abs(a - b))))
-    record("Markovian lift", "ETDRK4 vs implicit trapezoidal + Richardson (H=0.12)", worst,
-           5e-6, worst < 5e-6, note="independent time-steppers, 1 d / 30 d / 1 y")
+    # 200 steps until Session K: at 4.1e-6 of a 5e-6 limit the check was measuring the
+    # REFERENCE's error, not the solver's (exptrap moves 3.7e-6 from 200 to 800 steps at
+    # 1 y, ETDRK4 4e-8 from 2x to 8x). At 800 the difference settles at 6.2e-7 (1600: 7.0e-7)
+    record("Markovian lift", "ETDRK4 vs implicit trapezoidal + Richardson, 800-step reference (H=0.12)",
+           worst, 2e-6, worst < 2e-6, note="independent time-steppers, 1 d / 30 d / 1 y")
 
 
 def h_timing():
@@ -543,7 +556,7 @@ def h_timing():
     ratio, n_ref = throttle_ratio(ref)
     throttled = ratio > THROTTLE
     record("Engineering", "CPU reference workload", ref, float("inf"), True, unit="s",
-           note=f"best of 3; {ratio:.2f}x this machine's median over {n_ref} earlier runs"
+           note=f"best of 3; {ratio:.2f}x the fastest of this machine's last {n_ref} runs"
            + (" -- THROTTLED" if throttled else ""))
     # A throttled run is judged on its speed-normalised time and kept out of the timing trend
     # (the rolling-mean target is for this machine at its normal speed).
@@ -801,12 +814,14 @@ def h_positivity():
     mn = kf.LiftedRoughModel(1 / 252, H=0.12, v0=0.09)
     zs = []
     for seed in (61, 63):
-        Vn, _ = kf.simulate_rough(mn, nf, 3000, seed=seed)
+        # 16 substeps: at the default 4 the simulator under-resolves the 40-node lift and QML
+        # kappa reads +1.06 SE rather than +0.35 (Session I, test_filters.py)
+        Vn, _ = kf.simulate_rough(mn, nf, 3000, seed=seed, substeps=16)
         yn = Vn + np.random.default_rng(600 + seed).normal(0.0, 0.01, 3000)
         ll = [kf.kalman_filter(mn, dict(nf, kappa=3.0 + e), yn)["loglik"] for e in (-0.15, 0.0, 0.15)]
         info = -(ll[2] - 2 * ll[1] + ll[0]) / 0.15 ** 2
         zs.append((ll[2] - ll[0]) / 0.3 / math.sqrt(info) if info > 0 else float("nan"))
-    record("Positivity (Session G)", "exact-moment filter: QML kappa bias away from zero, mean z", abs(float(np.mean(zs))),
+    record("Positivity (Session G)", "exact-moment filter: QML kappa bias away from zero, 16-substep data, mean z", abs(float(np.mean(zs))),
            2.0, abs(float(np.mean(zs))) < 2.0, unit="SE",
            note="near zero a Gaussian quasi-likelihood is unreliable (open flag)")
 
@@ -957,6 +972,37 @@ def h_clock():
 
 
 # ------------------------------------------------------------------ engineering
+def h_hedging():
+    """
+    Session J's hedging machinery, on the standing dashboard: the discrete-time
+    risk-minimising hedge has to price what the cf prices, the variance swap has to be a
+    martingale, and adding it -- which completes the lifted model -- has to pay for itself.
+    """
+    import models.hedging as hd
+    import models.rough_heston as rh
+    G = "Hedging (Session J)"
+    P = rh.RoughHestonParams(0.04, 2.0, 0.04, 0.3, -0.7, 0.12)
+    T, n, K = 1.0 / 12, 128, 1.0
+    price = float(rh.call_prices(np.array([0.0]), T, P)[0][0])
+    train = hd.simulate_paths(P, T, n, 6000, seed=41)
+    test = hd.simulate_paths(P, T, n, 6000, seed=42)
+    f1 = hd.hmc_fit(train, K, 1)
+    z = abs(f1["C0"] - price) / f1["C0_se"]
+    record(G, "hedged Monte Carlo price vs the cf price", z, 3.0, z < 3.0, unit="SE",
+           note=f"{f1['C0']:.6f} +/- {f1['C0_se']:.6f} vs {price:.6f}; a low-variance price estimator")
+    M = test["M"]
+    zm = abs(float(M[-1].mean()) - float(M[0, 0])) / (float(M[-1].std()) / math.sqrt(M.shape[1]))
+    record(G, "variance swap is a martingale: E[M_T] = M_0", zm, 3.0, zm < 3.0, unit="SE",
+           note=f"M_0 {float(M[0, 0]):.6f}; it pays the option's own realised variance")
+    f2 = hd.hmc_fit(train, K, 1, instruments=("S", "M"))
+    e1 = hd.hedge_error(test, K, 1, price, "hmc", fit=f1)
+    e2 = hd.hedge_error(test, K, 1, price, "hmc2", fit=f2)
+    ratio = float(e2.std() / e1.std())
+    record(G, "residual with the variance swap / with the underlying alone", ratio, 0.6, ratio < 0.6,
+           note=f"{e2.std() / price:.3f} vs {e1.std() / price:.3f} of the price; the lifted model is "
+                "complete with both instruments")
+
+
 def h_engineering():
     out = subprocess.run(
         [sys.executable, "-c",
@@ -1036,7 +1082,7 @@ CHECKS = [h_timing, h_normal, h_black_scholes, h_finite_difference, h_char_func,
           h_hurst, h_forward, h_svi, h_arbitrage, h_calibration,
           h_fractional_kernel, h_lift, h_rough_robustness, h_identifiability_rough,
           h_hawkes, h_kalman, h_recording, h_positivity, h_lift_fidelity, h_weighting, h_learn_h,
-          h_zero_boundary, h_clock, h_engineering, h_replay]
+          h_zero_boundary, h_clock, h_hedging, h_engineering, h_replay]
 
 
 def main():
@@ -1110,6 +1156,8 @@ TREND_RULES = {
     "rough objective evaluation, 10 expiries x 13 strikes": {"mean_max": 0.75, "window": 10,
                                                              "same_host": True},
     "recursive MLE (Ljung) distance from the MLE": {"max_max": 2.0, "window": 20},
+    "ETDRK4 vs implicit trapezoidal + Richardson, 800-step reference (H=0.12)": {"max_max": 2e-6},
+    "exact-moment filter: QML kappa bias away from zero, 16-substep data, mean z": {"max_max": 2.0, "window": 10},
     "kernel error of the default lift, t in [1 day, 2 y]": {"max_max": 0.01},
     "kernel error on [1 hour, 2 y]": {"max_max": 0.01},
     "kernel error of the default lift, worst over H in [0.02, 0.5], [1 day, 2 y]": {"max_max": 0.01},
