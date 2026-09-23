@@ -24,7 +24,7 @@ models/rough_heston_adams.py          TRUE rough Heston cf by fractional Adams (
 models/hawkes.py                      Hawkes process: exact simulation, closed forms, MLE, time rescaling
 models/jump_hosts.py                  Hawkes jumps on OU / Heston / rough Heston (driver jumps, sized by impact)
 models/fbm.py                         exact fGn / fBm: circulant embedding (Davies-Harte = Wood-Chan), Cholesky, Hosking
-models/hedging.py                     path simulation with forward variance; BS greeks; hedged Monte Carlo
+models/hedging.py                     paths with forward variance and a variance swap; BS greeks; hedged Monte Carlo
 filters/kalman.py                     Kalman on OU / CIR / lifted rough; adaptive, robust, dual, recursive MLE;
                                       exact-moment rough filter, realised-variance filter, H learned
 filters/particle.py                   particle filters on the QE step; fully adapted version at the zero boundary
@@ -49,7 +49,7 @@ study_finer_lift.py                   N = 24 / 32 / 40 lifts: prices vs Adams, k
 study_jump_modes.py                   driver vs direct rough jumps (Session H brief; direct mode kept only here)
 study_stability_constants.py          the Riccati stability edges, measured on a given lift
 study_fbm_methods.py                  fBm generators compared; Shevchenko's steps 1-10 checked
-study_hedging.py                      discrete hedging under rough Heston: BS delta vs hedged Monte Carlo
+study_hedging.py                      discrete hedging under rough Heston: BS delta, hedged MC, + variance swap
 benchmark_riccati.py                  einsum vs matmul vs pinned BLAS in the Riccati step, per n_u
 debug_fbm_helper.py                   the Session A fBm fixture bug, reproduced
 debug_fd_methods.py                   which 2nd-derivative stencil holds order on real grids
@@ -68,7 +68,7 @@ test_clock.py                         45 checks   (Session H: NYSE calendar, var
 test_nongaussian.py                   20 checks   (Session H: particle and cf filters; slow tier)
 test_protocol.py                       9 checks   (Session I: RV cf filter, zero-boundary protocol)
 test_fbm.py                           19 checks   (Session I: exact fGn / fBm, Breuer-Major)
-test_hedging.py                        9 checks   (Session J: hedged Monte Carlo, discrete hedging law)
+test_hedging.py                       14 checks   (Sessions J-K: hedged Monte Carlo, variance swap)
 conftest.py / pytest.ini              every suite runs under pytest; `-m "not slow"` is the quick tier
 .github/workflows/ci.yml              quick tier on push; full tier + health trend weekly / on demand
 docs/tutorial-ibkr-recording.md       how to install, log in and record (the part that needs Akin)
@@ -99,7 +99,7 @@ captures/                             frames, GIFs, comparisons, snapshot.json
 .venv/Scripts/python.exe record_chains.py --check # IBKR smoke test (needs IB Gateway)
 .venv/Scripts/python.exe run_real_data.py --synthetic   # pipeline on a known answer
 .venv/Scripts/python.exe volatility_surface_3.py --demo # the live dashboard on a fake market, no TWS
-.venv/Scripts/python.exe healthcheck.py --trend         # 121 analytical checks + trends
+.venv/Scripts/python.exe healthcheck.py --trend         # 124 analytical checks + trends
 .venv/Scripts/python.exe capture_heston.py      # Heston's own skew term structure
 .venv/Scripts/python.exe capture_calibration.py # Phase 1 baseline vs a rough surface
 .venv/Scripts/python.exe capture_v3.py    # re-render + end-to-end validation
@@ -704,22 +704,27 @@ The analytics review's configuration is the default now (`docs/session-i-report.
 - **One design system** (`ui/theme.py`) for the dashboard (`--demo` runs it without TWS)
   and the report figure. The figure's dual axis is gone.
 
-## Session J (2026-09-21) -- discrete hedging on the simulated paths
+## Sessions J-K (2026-09-21/23) -- discrete hedging on the simulated paths
 
 `models/hedging.py`, `study_hedging.py`, `docs/study-hedging.md`. A one-month
-at-the-money call is hedged with the underlying alone on 20 000 rough-Heston paths,
-comparing Black-Scholes delta with Hedged Monte Carlo (Potters, Bouchaud & Sestovic
-2001: the discrete-time risk-minimising hedge, fitted by backward regression).
+at-the-money call is hedged on 20 000 rough-Heston paths, comparing Black-Scholes delta
+with Hedged Monte Carlo (Potters, Bouchaud & Sestovic 2001: the discrete-time
+risk-minimising hedge, fitted by backward regression), with the underlying alone and with
+a variance swap beside it.
 
 - **The Bertsimas-Kogan-Lo law holds in the control**, to within 2-5% from 1.4 hours to
   2 days.
-- **Rough volatility leaves a floor** that rebalancing cannot remove: 11% of the price at
-  H = 0.45, 30% at H = 0.05.
-- **The discrete-time hedge takes 10-15% off Black-Scholes delta** and 17-20% off its
-  99% loss.
-- **Roughness slows the approach to the continuous limit.** The effective exponent in
-  residual^2 = floor^2 + a dt^gamma falls from 0.97 in the control to 0.63-0.73 at
-  H = 0.05, for every rule.
+- **With the underlying alone, rough volatility leaves a floor** that rebalancing cannot
+  remove: 11% of the price at H = 0.45, 30% at H = 0.05. The discrete-time hedge takes
+  10-15% off Black-Scholes delta and 17-20% off its 99% loss.
+- **That floor is an instrument problem, not a law.** A variance swap completes the
+  lifted model: the fitted floor drops to 0.000-0.013 and the residual by 2.7x (H = 0.45)
+  to 3.9x (H = 0.05), the 99% loss by about 5x at rough H.
+- **Roughness slows the approach to the continuous limit**, and the complete hedge shows
+  it without a floor in the way: the exponent in residual^2 = floor^2 + a dt^gamma falls
+  from 0.97 (control) to 0.75 at H = 0.05. A rough-vanna term at dt^(2H) fits worse than
+  one free exponent, so the effective exponent is a description, not an explanation.
+- Three of these run as standing health checks.
 
 ## Still open
 

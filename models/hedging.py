@@ -17,6 +17,14 @@ minimal-variance hedge also carries the correlation between the price and the vo
 (for rough Heston, between S and the forward variance curve), and leaves a residual that
 no rebalancing removes.
 
+Hedging instruments: the underlying alone ("S"), or the underlying and a variance swap
+("S", "M"). M_t = int_0^t V ds + E[int_t^T V ds | F_t] is the price process of the claim
+that pays the option's own realised variance at T -- a martingale, affine in the lifted
+factors. With both, the lifted model is complete: one Brownian motion drives the price,
+one the variance, so in continuous time the hedge replicates and nothing is left over.
+What remains at a finite rebalancing interval is then the discretisation alone, with no
+floor to hide it.
+
 Here the state is z = (S, sigma_hat), sigma_hat = sqrt(E[int_t^T V ds | F_t] / (T - t)):
 the model's expected average volatility to maturity, affine in the lifted factors and
 exact (forward_variance_coefficients). Regression targets are the realised hedged cash
@@ -74,14 +82,20 @@ def simulate_paths(p, T, n_steps, n_paths, seed=0):
     S = np.empty((n_steps + 1, n_paths))
     V = np.empty_like(S)
     FV = np.empty_like(S)
-    S[0], V[0], FV[0] = 1.0, p.v0, A[0]
+    RV = np.empty_like(S)                      # realised variance so far, int_0^t V ds
+    S[0], V[0], FV[0], RV[0] = 1.0, p.v0, A[0], 0.0
+    I = np.zeros(n_paths)
     for k in range(n_steps):
         y, Vk, dI, dZ, fix = st.step_y(y, rng, with_log_price=True)
         X += -0.5 * dI + p.rho * dZ + srho * np.sqrt(dI) * rng.standard_normal(n_paths) + fix
+        I += dI
         S[k + 1] = np.exp(X)
         V[k + 1] = Vk
         FV[k + 1] = np.maximum(A[k + 1] + B[k + 1] @ y, 0.0)
-    return {"t": h * np.arange(n_steps + 1), "tau": taus, "S": S, "V": V, "FV": FV, "T": T}
+        RV[k + 1] = I
+    # the variance swap's price process: realised so far plus the forward variance, a martingale
+    return {"t": h * np.arange(n_steps + 1), "tau": taus, "S": S, "V": V, "FV": FV, "RV": RV,
+            "M": RV + FV, "T": T}
 
 
 # ------------------------------------------------------------------ Black-Scholes, zero rates
@@ -115,7 +129,10 @@ def _features(S, sig, tau, K):
     one = np.ones_like(S)
     psi = np.column_stack([one, price, delta, vega, vega * m, vega * m * m])
     chi = np.column_stack([one, delta, pdf, pdf * m, pdf * m * m, pdf * sig])
-    return psi, chi
+    # dC/d(forward variance) = vega / (2 sigma tau): the natural scale of a variance-swap hedge
+    vg = vega / (2.0 * np.maximum(sig, 1e-6) * max(tau, 1e-12))
+    chi_m = np.column_stack([one, vg, vg * m, vg * m * m])
+    return psi, chi, chi_m
 
 
 def _lstsq(X, y):
@@ -130,35 +147,48 @@ def _lstsq(X, y):
     return coef
 
 
-def hmc_fit(paths, K, every):
+def hmc_fit(paths, K, every, instruments=("S",)):
     """
-    Hedged Monte Carlo on training paths, rebalancing every `every` steps: coefficients of
-    C_k and phi_k at each rebalancing date, and the price C_0.
+    Hedged Monte Carlo on training paths, rebalancing every `every` steps: the coefficients
+    of C_k and of each instrument's hedge ratio at every rebalancing date, and the price C_0.
+
+    instruments: ("S",) the underlying alone, or ("S", "M") with the variance swap, which
+    completes the market.
     """
     n = len(paths["t"]) - 1
     dates = list(range(0, n, every))
-    S = paths["S"]
-    Y = np.maximum(S[n] - K, 0.0)                    # realised hedged cash flow from the next date on
+    Y = np.maximum(paths["S"][n] - K, 0.0)           # realised hedged cash flow from the next date on
     coefs = {}
     for k in reversed(dates):
         k2 = min(k + every, n)
-        dS = S[k2] - S[k]
-        psi, chi = _features(S[k], model_sigma(paths, k), paths["tau"][k], K)
-        X = np.hstack([psi, chi * dS[:, None]])
-        c = _lstsq(X, Y)
-        a, b = c[:psi.shape[1]], c[psi.shape[1]:]
-        phi = chi @ b
-        coefs[k] = (a, b)
-        Y = Y - phi * dS
+        psi, chi, chi_m = _features(paths["S"][k], model_sigma(paths, k), paths["tau"][k], K)
+        blocks, bases, deltas = [psi], [], []
+        for inst in instruments:
+            d = paths[inst][k2] - paths[inst][k]
+            basis = chi if inst == "S" else chi_m
+            blocks.append(basis * d[:, None])
+            bases.append(basis)
+            deltas.append(d)
+        c = _lstsq(np.hstack(blocks), Y)
+        j = psi.shape[1]
+        a, phis = c[:j], []
+        for basis in bases:
+            phis.append(basis @ c[j:j + basis.shape[1]])
+            j += basis.shape[1]
+        coefs[k] = (a, c[psi.shape[1]:])
+        for phi, d in zip(phis, deltas):
+            Y = Y - phi * d
     C0 = float(np.mean(Y))
-    return {"dates": dates, "coefs": coefs, "C0": C0, "C0_se": float(np.std(Y) / math.sqrt(len(Y)))}
+    return {"dates": dates, "coefs": coefs, "C0": C0, "C0_se": float(np.std(Y) / math.sqrt(len(Y))),
+            "instruments": tuple(instruments)}
 
 
 def hedge_error(paths, K, every, premium, rule, fit=None, sigma_fixed=None):
     """
-    Terminal hedging error of the option writer: premium + sum_k phi_k dS_k - payoff, on
+    Terminal hedging error of the option writer: premium + the hedge's gains - payoff, on
     `paths`, rebalancing every `every` steps. rule: "bs_fixed" (Black-Scholes delta at
-    sigma_fixed), "bs_model" (BS delta at sigma_hat), "hmc" (the fitted risk-minimising rule).
+    sigma_fixed), "bs_model" (BS delta at sigma_hat), "hmc" / "hmc2" (the fitted
+    risk-minimising rule, on the instruments its fit was built with).
     """
     n = len(paths["t"]) - 1
     S = paths["S"]
@@ -166,13 +196,19 @@ def hedge_error(paths, K, every, premium, rule, fit=None, sigma_fixed=None):
     for k in range(0, n, every):
         k2 = min(k + every, n)
         tau = paths["tau"][k]
+        if rule in ("hmc", "hmc2"):
+            psi, chi, chi_m = _features(S[k], model_sigma(paths, k), tau, K)
+            coef, j = fit["coefs"][k][1], 0
+            for inst in fit["instruments"]:
+                basis = chi if inst == "S" else chi_m
+                phi = basis @ coef[j:j + basis.shape[1]]
+                gains += phi * (paths[inst][k2] - paths[inst][k])
+                j += basis.shape[1]
+            continue
         if rule == "bs_fixed":
             phi = bs_delta(S[k], K, sigma_fixed, tau)
         elif rule == "bs_model":
             phi = bs_delta(S[k], K, model_sigma(paths, k), tau)
-        elif rule == "hmc":
-            _, chi = _features(S[k], model_sigma(paths, k), tau, K)
-            phi = chi @ fit["coefs"][k][1]
         else:
             raise ValueError(rule)
         gains += phi * (S[k2] - S[k])

@@ -9,6 +9,9 @@ Session J -- discrete hedging on the simulated rough-Heston paths (models/hedgin
   rough vol    Hedged Monte Carlo prices the call at the cf price; no hedging rule loses
                money on average; the risk-minimising rule beats Black-Scholes delta out of
                sample; and a floor remains that rebalancing does not remove
+  var swap     the variance swap is a martingale that pays the realised variance, its
+               hedge ratio is the option's sensitivity to the forward variance, and adding
+               it (which completes the lifted model) cuts the floor by more than half
 
     python test_hedging.py
 """
@@ -64,7 +67,7 @@ def test_bs_limit():
     tr = hd.simulate_paths(P, T, N, 6000, seed=5)
     te = hd.simulate_paths(P, T, N, 6000, seed=6)
     fit = hd.hmc_fit(tr, K, 1)
-    _, chi = hd._features(np.array([1.0]), np.array([math.sqrt(te["FV"][0, 0] / T)]), T, K)
+    _, chi, _ = hd._features(np.array([1.0]), np.array([math.sqrt(te["FV"][0, 0] / T)]), T, K)
     phi0 = float((chi @ fit["coefs"][0][1])[0])
     d0 = float(hd.bs_delta(1.0, K, math.sqrt(te["FV"][0, 0] / T), T))
     check("the risk-minimising hedge at t = 0 is the Black-Scholes delta (within 0.01)", abs(phi0 - d0) < 0.01,
@@ -112,6 +115,37 @@ def test_rough():
           ratio > 3.0, f"{eh.std() / price:.3f} vs {ec.std() / pc:.3f} of the price ({ratio:.1f}x)")
 
 
+def test_variance_swap():
+    print("\nHedging with the underlying and a variance swap (the lifted model is then complete)")
+    P = rh.RoughHestonParams(0.04, 2.0, 0.04, 0.3, -0.7, 0.12)
+    price = float(rh.call_prices(np.array([0.0]), T, P)[0][0])
+    tr = hd.simulate_paths(P, T, N, 8000, seed=11)
+    te = hd.simulate_paths(P, T, N, 8000, seed=12)
+    M = te["M"]
+    z = (M[-1].mean() - M[0, 0]) / (M[-1].std() / math.sqrt(M.shape[1]))
+    check("the variance swap is a martingale: E[M_T] = M_0 within 3 SE", abs(z) < 3.0,
+          f"{M[-1].mean():.6f} vs {M[0, 0]:.6f}, z = {z:+.2f}")
+    check("...and it pays the realised variance: M_T = int_0^T V dt", np.allclose(M[-1], te["RV"][-1]),
+          f"max |diff| {float(np.max(np.abs(M[-1] - te['RV'][-1]))):.1e}")
+    f1 = hd.hmc_fit(tr, K, 1)
+    f2 = hd.hmc_fit(tr, K, 1, instruments=("S", "M"))
+    e1 = hd.hedge_error(te, K, 1, price, "hmc", fit=f1)
+    e2 = hd.hedge_error(te, K, 1, price, "hmc2", fit=f2)
+    check("adding the variance swap cuts the residual by more than half at the finest interval",
+          e2.std() < 0.5 * e1.std(),
+          f"{e2.std() / price:.3f} vs {e1.std() / price:.3f} of the price")
+    check("it still prices the call at the cf price (3 SE)", abs(f2["C0"] - price) < 3 * f2["C0_se"],
+          f"{f2['C0']:.6f} +/- {f2['C0_se']:.6f} vs {price:.6f}")
+    sig0 = math.sqrt(te["FV"][0, 0] / T)
+    _, _, chi_m = hd._features(np.array([1.0]), np.array([sig0]), T, K)
+    j = hd._features(np.array([1.0]), np.array([sig0]), T, K)[1].shape[1]
+    phi_m = float((chi_m @ f2["coefs"][0][1][j:])[0])
+    vega_v = float(hd.bs_call(1.0, K, sig0 * 1.001, T) - hd.bs_call(1.0, K, sig0, T)) / (0.001 * sig0)
+    theory = vega_v / (2 * sig0 * T)                      # dC/d(forward variance) at sigma_hat
+    check("the variance-swap hedge ratio is the option's sensitivity to forward variance (within 30%)",
+          abs(phi_m / theory - 1) < 0.3, f"fitted {phi_m:.4f} vs Black-Scholes {theory:.4f}")
+
+
 if __name__ == "__main__":
     print("=" * 74)
     print("Session J -- discrete hedging on simulated rough-Heston paths")
@@ -120,6 +154,7 @@ if __name__ == "__main__":
     test_paths()
     test_bs_limit()
     test_rough()
+    test_variance_swap()
     print("\n" + "=" * 74)
     print(f"{len(PASS)} passed, {len(FAIL)} failed   ({time.perf_counter()-t0:.0f}s)")
     for f in FAIL:

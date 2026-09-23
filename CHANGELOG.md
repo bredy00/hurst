@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased: Sessions J and K, discrete hedging and the checks that watch it
+
+### Added
+- `models/hedging.py`: rough-Heston paths carrying the exact forward variance and a
+  variance swap, Black-Scholes greeks, and Hedged Monte Carlo (Potters, Bouchaud &
+  Sestovic 2001) -- the discrete-time risk-minimising hedge, fitted by backward
+  regression on realised hedged cash flows and applied out of sample, with the underlying
+  alone or with the variance swap that completes the lifted model.
+- `study_hedging.py`, `test_hedging.py` (14 checks) and `docs/study-hedging.md`: the
+  Bertsimas-Kogan-Lo law reproduced in the control; the volatility-risk floor and its
+  dependence on H; the floor removed by the variance swap (residual down 2.7-3.9x, the
+  99% loss about 5x at rough H); and the approach to the continuous limit slowing from
+  dt^0.97 to dt^0.75 as H falls to 0.05.
+- Three standing health checks for that machinery (124 in total).
+
+### Fixed
+- **The throttle guard could not fire.** It compared a run against the MEDIAN of earlier
+  runs, and those included throttled ones: on 21 September a machine at 58% of its own
+  best speed read 0.97-1.09x, and its timings went into the trend. The baseline is now
+  the fastest of the last 20 runs on that machine, which read 1.58x for the same run.
+- **The cross-scheme check measured its own reference.** ETDRK4 against
+  exptrap+Richardson sat at 4.1e-6 of a 5e-6 limit because the reference used 200 steps;
+  at 800 the difference settles at 6.2e-7 (1600: 7.0e-7). Limit now 2e-6.
+- **The QML-bias health check** simulates at 16 substeps, as the test suite has since
+  Session I; at 4 the simulator under-resolves the 40-node lift (+1.06 SE against +0.35).
+
 ## v1.0.0 (2026-09-19): Session I, the decisions implemented
 
 The configuration for real-data runs chosen in the analytics review of 18 September 2026,
