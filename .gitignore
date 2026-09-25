@@ -10,3 +10,6 @@ captures/healthcheck.log
 captures/real/report/
 captures/real/synthetic/
 captures/pytest_*.log
+
+# the Session L trial regenerates its demo-market databases (5 MB each; study_trial_bl_hurst.py)
+captures/trial/
