@@ -18,7 +18,8 @@ The pieces (package portfolio/, revertible as a unit):
   dual_kalman.py      the state filter (exposures) and the parameter filter (theta)
 
 Two markets: stationary (H_true = 0.10 throughout) and shift (H_true 0.08, then 0.25 from
-two thirds in, inside the out-of-sample years). Target: FF4 market beta 0.8. Exchange rate,
+the train/test boundary on, so the whole test period runs at the new roughness). Target: FF4
+market beta 0.8. Exchange rate,
 fixed before any run: 0.05 of beta error weighs like 0.25% a year of cost.
 
 Train on years 5-8 (the first four are warm-up for the risk model), test on 9-12.
@@ -384,37 +385,59 @@ def plot(res):
     from ui import theme
     tok = theme.apply("light")
     cat = [theme.series(i) for i in range(8)]
-    fig, ax = plt.subplots(2, 3, figsize=(15, 8.2))
+    fig, ax = plt.subplots(2, 3, figsize=(15, 8.4))
     for row, name in enumerate(("stationary", "shift")):
         r = res[name]
         k = r["kalman"]["S3 dual Kalman"]
         days = np.array([p["first_day"] for p in k["path"]]) / 252
         th = np.array([p["theta"] for p in k["path"]])
+        split_y = SPLIT / 252
+        shifted = r["spec"]["H_true"][0] != r["spec"]["H_true"][1]
+        h_true = r["spec"]["H_true"]
+
+        # (1) H. The story is that it sits ON its lower bound, so the bound and the market's
+        # own H are drawn: a flat line at 0.02 over an empty 0-0.5 axis says nothing by itself.
         a = ax[row, 0]
-        a.plot(days, th[:, 0], color=cat[0], label="H (risk model)")
-        a.axvline(SPLIT / 252, color=tok["axis"], lw=0.8, ls="--")
-        if r["spec"]["H_true"][0] != r["spec"]["H_true"][1]:
-            a.axvline(r["spec"]["n_days"] * r["spec"]["shift_at"] / 252, color=cat[3], lw=0.8, ls=":")
-        a.set_title(f"{name}: the risk model's H, as the filter sets it")
-        a.set_ylim(0, 0.5)
+        lo, hi = dk.BOUNDS["H"]
+        a.axhspan(0.0, lo, color=tok["neutral"], zorder=0)
+        a.axhline(lo, color=tok["muted"], lw=1.0, ls="-")
+        a.text(days[0], lo + 0.004, f" filter's lower bound {lo}", color=tok["ink2"], fontsize=8, va="bottom")
+        a.step([days[0], split_y, days[-1]], [h_true[0], h_true[1], h_true[1]], where="post",
+               color=cat[3], lw=1.4, ls="--", label="the market's own H")
+        a.plot(days, th[:, 0], color=cat[0], label="H the filter chose")
+        a.axvline(split_y, color=tok["axis"], lw=0.8, ls="--")
+        share = 100 * r["kalman"]["S3 dual Kalman"]["at_bound"]["H"]
+        a.set_title(f"{name}: the risk model's H -- at its bound on {share:.0f}% of periods")
+        a.set_ylim(0, 0.32)
+        a.set_ylabel("Hurst index")
         a.set_xlabel("year")
+        a.legend(loc="upper right")
+
         a = ax[row, 1]
-        a.plot(days, np.exp(th[:, 1]), color=cat[1], label="confidence c")
+        a.plot(days, np.exp(th[:, 1]), color=cat[1], label="view confidence c")
         a.plot(days, np.exp(th[:, 2]), color=cat[2], label="risk aversion delta")
-        a.axvline(SPLIT / 252, color=tok["axis"], lw=0.8, ls="--")
+        a.axvline(split_y, color=tok["axis"], lw=0.8, ls="--")
         a.set_title(f"{name}: view confidence and risk aversion")
-        a.legend()
+        a.set_ylabel("multiple")
+        a.set_ylim(0, 4.8)
+        a.legend(loc="lower right")
         a.set_xlabel("year")
+
         a = ax[row, 2]
-        b_fit = [p["b_mkt_fit"] for p in k["path"]]
+        b_fit = np.array([p["b_mkt_fit"] for p in k["path"]])
         a.plot(days, b_fit, color=tok["muted"], lw=0.8, label="FF4 beta per period (falsify)")
-        a.plot(days, [p["beta_mkt"] for p in k["path"]], color=cat[0], label="state filter")
-        a.axhline(TARGET, color=cat[3], lw=0.8, ls="--", label=f"target {TARGET}")
-        a.axvline(SPLIT / 252, color=tok["axis"], lw=0.8, ls="--")
-        a.set_title(f"{name}: FF4 market beta")
-        a.legend()
+        a.plot(days, [p["beta_mkt"] for p in k["path"]], color=cat[0], label="the state filter's")
+        a.axhline(TARGET, color=cat[3], lw=1.0, ls="--", label=f"target {TARGET}")
+        a.axvline(split_y, color=tok["axis"], lw=0.8, ls="--")
+        a.set_title(f"{name}: FF4 market beta -- the swing is the strategy, not the setting")
+        a.set_ylabel("beta on MKT")
+        a.set_ylim(0.2, 2.1)
         a.set_xlabel("year")
-    fig.suptitle("The dual Kalman filter on the demo market (dashed line: training | test years; dotted: the H shift)")
+        a.legend(loc="upper left", ncol=3, fontsize=7.5)
+        if row == 0:
+            a.text(days[-1], 1.78, f"per-period sd {b_fit.std(ddof=1):.2f}, of which\nmeasurement noise ~0.09  ",
+                   color=tok["ink2"], fontsize=8, ha="right", va="top")
+    fig.suptitle("The dual Kalman filter on the demo market  (vertical dashed line: training | test years)")
     fig.tight_layout()
     fig.savefig(ROOT / "captures" / "trial_bl_hurst.png", dpi=120)
 

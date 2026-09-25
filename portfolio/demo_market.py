@@ -7,8 +7,8 @@ factors, rough factor volatility and a SQLite database, where every answer is kn
             rough, log sigma_k,t = log sigmabar_k + eta_k Y_k,t, Y a fractional Ornstein-
             Uhlenbeck process, dY = -kappa Y dt + dB^H, driven by EXACT fractional Gaussian
             noise (models/fbm.py: Shevchenko's circulant embedding). The Hurst index can
-            switch once (at shift_at, two thirds in by default: inside the out-of-sample
-            years), to give an adaptive method something to adapt to.
+            switch once, at shift_at (two thirds in by default, which is where the trial
+            splits train from test), to give an adaptive method something to adapt to.
   RV        a daily realised variance per factor, sigma^2 dt exp(omega z - omega^2 / 2): the
             measurement a real run would have, level-unbiased, ~35% noise (omega = 0.35).
   assets    r_i,t = beta_i' f_t + s_i u_i,t with NO alpha anywhere: whatever alpha a backtest

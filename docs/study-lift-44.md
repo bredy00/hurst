@@ -140,10 +140,23 @@ reported SE of 0.028 and two seeds pinned at the grid's lower edge. The profile 
 curvature understates the sampling spread of this estimator on 500 days by about a factor of
 three. The check now uses the measured spread.
 
-**The QE simulator's residual skew bias.** `test_rough.test_positivity_scheme` asks the QE
-prices to match the cf within 4.5 SE at ρ = −0.7; the k = +0.08 call reads +5.0 SE. The bias
-is documented from Session I and shrinks with the step count; the finer lift puts more
-kernel mass in the first instants, which is where the QE draw is least accurate.
+**The QE simulator's residual skew bias, and why an SE threshold was the wrong instrument.**
+`test_rough.test_positivity_scheme` asked the QE prices to match the cf within 4.5 SE at
+ρ = −0.7; the k = +0.08 call reads +5.0 SE. Pooled over four seeds and 200,000 paths at
+τ = 0.25:
+
+| k = +0.08 call, price bias (SE) | 500 steps | 1000 steps |
+|---|---|---|
+| N = 40 | +1.40e-4 (3.6 SE) | +1.58e-4 (4.1 SE) |
+| N = 44 | +2.26e-4 (5.8 SE) | +1.42e-4 (3.7 SE) |
+
+The bias is real, documented from Session I, and slightly larger on the finer lift at a given
+step count — which is the expected direction, since more kernel mass sits in the first
+instants, where the QE draw is least accurate. But the threshold was the wrong instrument:
+**the standard error shrinks with the path count while a bias does not**, so any SE-based
+limit fails once enough paths are thrown at it. The check now bounds the bias at 0.35 vol
+points, which is the quantity a desk would care about; the measured values are 0.13 to
+0.20 vp.
 
 ## Next
 

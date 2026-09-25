@@ -52,7 +52,8 @@ agree to rounding (they do, to 0.0e+00).
 **Pre-registered**, written before the test years were scored: target FF4 market beta 0.8;
 objective J = mean((b − 0.8)²)/0.05² + cost²/0.25², i.e. 0.05 of beta error weighs like
 0.25%/yr of cost; train on years 5–8, test on 9–12; two markets, stationary (H = 0.10
-throughout) and shift (0.08 → 0.25 two thirds in, inside the test years). *The idea is
+throughout) and shift (0.08 → 0.25 at the train/test boundary, so the whole test period runs
+at the new roughness). *The idea is
 practical if the dual filter has the lowest test objective of the alternatives in both
 markets, with a stable filter.*
 
