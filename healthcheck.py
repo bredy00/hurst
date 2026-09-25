@@ -1057,6 +1057,82 @@ def h_lift_44():
                                       "criteria; the top node moves this one, the node count barely does")
 
 
+def h_rl():
+    """
+    Session M. The RL framework is off by default, so the first check is that it IS off --
+    a framework that quietly switched itself on would cost minutes on every run here. The
+    rest are the two things whose failure would be silent: the answer key (agents must
+    recover an exactly solvable MDP) and the Markov test's power (it must reject a state
+    that hides a lag, or it is decoration).
+    """
+    import rl
+    import rl.agents as ag
+    import rl.mdp as mdp
+    G = "Reinforcement learning (Session M)"
+    was = rl.is_enabled()
+    rl.disable()
+    try:
+        mdp.require()
+        refused = 0.0
+    except rl.Disabled:
+        refused = 1.0
+    record(G, "off by default: an entry point refuses until it is enabled", refused, 1.0, refused == 1.0,
+           note="`rl.enable()` or VOLSURF_RL=1; off because it costs more than the analytic route")
+    rl.enable()
+    try:
+        n = 5
+        P = np.zeros((n, 2, n))
+        R = np.zeros((n, 2))
+        for s in range(n - 1):
+            P[s, 0, s + 1] = 1.0
+            R[s, 0] = -1.0
+            P[s, 1, n - 1] = 1.0
+            R[s, 1] = -3.0
+        P[n - 1, :, n - 1] = 1.0
+        absorbing = np.array([False] * (n - 1) + [True])
+        M = mdp.TabularMDP(P, R, absorbing, gamma=1.0)
+        Q, V, pi, _ = M.value_iteration()
+        exact = np.array([-min(n - 1 - s, 3.0) for s in range(n)], dtype=float)
+        exact[-1] = 0.0
+        err_vi = float(np.max(np.abs(V - exact)))
+        record(G, "value iteration against the chain's closed form", err_vi, 1e-12, err_vi < 1e-12,
+               note="V(s) = -min(steps to the end, the jump's cost); absorbing states carry zero")
+
+        eye = np.eye(n)
+        s_l, a_l, r_l, sp_l = [], [], [], []
+        for st_ in range(n - 1):
+            for act in range(2):
+                for _ in range(200):
+                    s_l.append(st_)
+                    a_l.append(act)
+                    r_l.append(R[st_, act])
+                    sp_l.append(int(np.argmax(P[st_, act])))
+        b = ag.Batch(eye[s_l], np.array(a_l), np.array(r_l), eye[sp_l],
+                     absorbing[sp_l], 2, episode=np.arange(len(s_l)))
+        worst = 0.0
+        for model in (ag.FittedQ(sweeps=200, gamma=1.0, ridge=1e-10),
+                      ag.LSPI(iters=50, gamma=1.0, ridge=1e-10)):
+            Qh = model.fit(b).q(eye)
+            worst = max(worst, float(np.max(np.abs(Qh[:-1] - Q[:-1]))))
+        record(G, "the agents recover that exact Q from logged transitions", worst, 1e-8, worst < 1e-8,
+               note="the answer key: an agent that fails here is not evidence about a hard problem")
+
+        from rl.markov import lagged_design, markov_test
+        rng = np.random.default_rng(0)
+        m_ = 4000
+        y2 = np.zeros(m_)
+        for t in range(2, m_):
+            y2[t] = 0.5 * y2[t - 1] - 0.45 * y2[t - 2] + rng.standard_normal()
+        rows, _, f_t, f_p = lagged_design(y2[:, None], np.zeros(m_, int), np.arange(m_))
+        res = markov_test(f_t, f_p, y2[np.minimum(rows + 1, m_ - 1)][:, None], ["next y"])
+        r2 = res["next y"]["partial_r2"]
+        record(G, "the Markov test rejects a second-order chain seen through one lag", 100 * r2, 5.0,
+               r2 > 0.05 and not res["next y"]["markov"], unit="%",
+               note="the lag block's partial R^2; an AR(2) through a one-lag state must fail")
+    finally:
+        (rl.enable if was else rl.disable)()
+
+
 def h_engineering():
     out = subprocess.run(
         [sys.executable, "-c",
@@ -1136,7 +1212,7 @@ CHECKS = [h_timing, h_normal, h_black_scholes, h_finite_difference, h_char_func,
           h_hurst, h_forward, h_svi, h_arbitrage, h_calibration,
           h_fractional_kernel, h_lift, h_rough_robustness, h_identifiability_rough,
           h_hawkes, h_kalman, h_recording, h_positivity, h_lift_fidelity, h_weighting, h_learn_h,
-          h_zero_boundary, h_clock, h_hedging, h_lift_44, h_engineering, h_replay]
+          h_zero_boundary, h_clock, h_hedging, h_lift_44, h_rl, h_engineering, h_replay]
 
 
 def main():

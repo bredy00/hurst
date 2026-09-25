@@ -53,6 +53,8 @@ study_hedging.py                      discrete hedging under rough Heston: BS de
 study_lift_44.py                      N = 40 / 44 / 48: the kernel, prices, cost, and the lift against exact fGn
 study_egarch.py                       the T-EGARCH scan against rough Heston, with the true variance as the answer
 study_trial_bl_hurst.py               the Session L trial: Black-Litterman, FF4 and a dual Kalman filter on H
+study_rl.py                           the reinforcement-learning framework, graded against what is already here
+volsurf.py                            one entry point: doctor, health, test, demo, pipeline, study, rl, record
 benchmark_riccati.py                  einsum vs matmul vs pinned BLAS in the Riccati step, per n_u
 debug_fbm_helper.py                   the Session A fBm fixture bug, reproduced
 debug_fd_methods.py                   which 2nd-derivative stencil holds order on real grids
@@ -75,6 +77,8 @@ test_fbm.py                           23 checks   (Session I: exact fGn / fBm, B
 test_hedging.py                       14 checks   (Sessions J-K: hedged Monte Carlo, variance swap)
 test_egarch.py                        17 checks   (Session L: EGARCH-t, Beta-t-EGARCH, GARCH)
 test_portfolio.py                     42 checks   (Session L trial: demo market, Black-Litterman, dual Kalman)
+test_rl.py                            41 checks   (Session M: the MDP, the agents, the Markov test, both environments)
+rl/                                   reinforcement learning, OFF by default (7 modules; delete to revert)
 models/egarch.py                      EGARCH(p,q)-t, Beta-t-EGARCH and GARCH: one interface, BIC scan, QLIKE
 portfolio/                            the Session L trial, self-contained (5 modules; delete to revert)
 conftest.py / pytest.ini              every suite runs under pytest; `-m "not slow"` is the quick tier
@@ -85,6 +89,9 @@ docs/session-i-report.pdf             Session I: the decisions implemented, the 
 docs/study-lift-44.md                 Session L: 44 nodes, what they buy, and how they were paid for
 docs/study-egarch.md                  Session L: the T-EGARCH scan; BIC ranks the t models first, they forecast worst
 docs/trial-bl-hurst.md                Session L: the dual-Kalman-on-H trial, and why it does not work as stated
+docs/rl-framework.md                  Session M: the RL framework, and the argmax finding that bounds its use
+docs/customising.md                   the seams designed to be changed, with examples that run
+rl/README.md                          the RL quick reference: what it buys, and what it does not
 docs/overview-2026-09-15.pdf          Sessions A-H overview and recommendations
 docs/superpowers/plans/               the six-session rough Heston plan
 captures/                             frames, GIFs, comparisons, snapshot.json
@@ -92,6 +99,8 @@ captures/                             frames, GIFs, comparisons, snapshot.json
 ```
 
 ```bash
+.venv/Scripts/python.exe volsurf.py doctor   # can this checkout run? start here
+.venv/Scripts/python.exe volsurf.py study    # every study, with a line on each
 .venv/Scripts/python.exe test_core.py     # 108 passed
 .venv/Scripts/python.exe test_fixes.py    # 47 passed
 .venv/Scripts/python.exe test_surface.py  # 45 passed
@@ -104,15 +113,16 @@ captures/                             frames, GIFs, comparisons, snapshot.json
 .venv/Scripts/python.exe test_hawkes.py    # 52 passed, ~20 s
 .venv/Scripts/python.exe test_egarch.py    # 17 passed, ~25 s
 .venv/Scripts/python.exe test_portfolio.py # 42 passed, ~5 s
+.venv/Scripts/python.exe test_rl.py        # 41 passed, ~20 s
 .venv/Scripts/python.exe test_filters.py   # 46 passed, ~10 min
 .venv/Scripts/python.exe capture_session_f.py # Session F figure
 .venv/Scripts/python.exe -m pytest -m "not slow"  # quick tier, ~3 min
 .venv/Scripts/python.exe test_recording.py # 37 passed, ~30 s
-.venv/Scripts/python.exe -m pytest                # everything: 118 items, 743 checks (CI: 12 min)
+.venv/Scripts/python.exe -m pytest                # everything: 132 items, 781 checks (CI: 12 min)
 .venv/Scripts/python.exe record_chains.py --check # IBKR smoke test (needs IB Gateway)
 .venv/Scripts/python.exe run_real_data.py --synthetic   # pipeline on a known answer
 .venv/Scripts/python.exe volatility_surface_3.py --demo # the live dashboard on a fake market, no TWS
-.venv/Scripts/python.exe healthcheck.py --trend         # 128 analytical checks + trends
+.venv/Scripts/python.exe healthcheck.py --trend         # 132 analytical checks + trends
 .venv/Scripts/python.exe capture_heston.py      # Heston's own skew term structure
 .venv/Scripts/python.exe capture_calibration.py # Phase 1 baseline vs a rough surface
 .venv/Scripts/python.exe capture_v3.py    # re-render + end-to-end validation
@@ -777,6 +787,43 @@ a tenth, and implied vols come 16% closer to true rough Heston everywhere measur
   once enough paths are thrown at it (the QE skew bias is now bounded in vol points), and the
   synthetic history's H is three times noisier than the profile curvature reports (0.135 +/-
   0.079 over 21 seeds against a median reported SE of 0.028).
+
+## Session M (2026-09-26) -- a reinforcement-learning framework, and one way in
+
+`rl/`, **off by default** (`rl.enable()`, or `VOLSURF_RL=1`, or `python volsurf.py rl`).
+Built for someone who later wants to learn these policies rather than derive them, and
+built so it can say that deriving them is better -- because both problems it is pointed at
+have a known optimum. Full account: `docs/rl-framework.md`; quick reference: `rl/README.md`.
+
+- **The three primitives, and nothing else.** The Markov property *tested* rather than
+  assumed (a nested F test, with the sample size discounted for serially correlated
+  residuals and the lag block's partial R² beside its p-value, because at a million
+  transitions significance is not size); the policy as `argmax_a Q(s, a)`; and absorbing
+  states carried explicitly, so `gamma = 1` with an unreachable terminal is refused instead
+  of run to a divergence.
+- **An answer key runs first.** A chain whose value has a closed form, solved exactly by
+  value iteration; all three agents recover that Q to 1e-13 and the exact policy. An agent
+  that cannot solve a problem with a known answer is not evidence about one without.
+- **The agent learns something real and loses anyway.** Against Hedged Monte Carlo on the
+  same paths it holds *less* than the Black-Scholes delta, as the analytic hedge does --
+  the leverage adjustment, learned -- and gets about half the distance. It still leaves
+  **0.354 of the price against HMC's 0.305**, and neither more data (2k to 128k paths) nor
+  a finer action grid (3 to 41) closes it. **The reward is quadratic in the action: HMC
+  solves for the parabola's vertex, the argmax compares noisy neighbours.** When you know
+  the reward's structure, estimate it.
+- **Check that you have an MDP before paying for one.** The writer's hedge does not move the
+  market, so the next state does not depend on the action and the problem is a bandit. The
+  myopic agent is better *and twenty times cheaper* than the bootstrapped one.
+- **Filter selection is learned offline from logged runs**, graded against the Session I
+  protocol. Setting it up produced a finding of its own: the Kalman filter's boundary
+  diagnostic is far more sensitive than the stationary standard deviation suggests -- theta
+  0.045 / xi 0.3 flags 100% of days, 0.09 / 0.12 flags none -- and the first attempt had
+  nothing to select between.
+- **All three filters now report a per-day log-likelihood** (`loglik_t`). Needed by the
+  offline MDP, and a diagnostic in its own right: a total hides *where* a filter loses.
+- **`volsurf.py` is one entry point** -- `doctor`, `health`, `test`, `demo`, `pipeline`,
+  `study`, `rl`, `record` -- and `docs/customising.md` walks the six seams designed to be
+  changed, with examples that run.
 
 ## Still open
 

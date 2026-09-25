@@ -3,22 +3,22 @@
   {
    "group": "Engineering",
    "name": "CPU reference workload",
-   "measured": 0.29198650002945215,
+   "measured": 0.39047649991698563,
    "threshold": Infinity,
    "ok": true,
    "unit": "s",
-   "note": "best of 3; 1.26x the fastest of this machine's last 7 runs",
+   "note": "best of 3; 1.69x the fastest of this machine's last 8 runs -- THROTTLED",
    "trend": true
   },
   {
    "group": "Markovian lift",
    "name": "rough objective evaluation, 10 expiries x 13 strikes",
-   "measured": 0.494173499988392,
+   "measured": 0.6693394999019802,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
-   "note": "best of 3 (all: 0.52, 0.49, 0.50); trend target: rolling mean <= 0.75 s",
-   "trend": true
+   "note": "best of 3 (all: 0.67, 0.68, 0.67); trend target: rolling mean <= 0.75 s; THROTTLED 1.69x: judged at 0.40 s, not added to the trend",
+   "trend": false
   },
   {
    "group": "Foundations",
@@ -417,7 +417,7 @@
    "threshold": 0.01,
    "ok": true,
    "unit": "rel",
-   "note": "7 iters, 0.5s",
+   "note": "7 iters, 0.6s",
    "trend": true
   },
   {
@@ -1221,6 +1221,46 @@
    "trend": true
   },
   {
+   "group": "Reinforcement learning (Session M)",
+   "name": "off by default: an entry point refuses until it is enabled",
+   "measured": 1.0,
+   "threshold": 1.0,
+   "ok": true,
+   "unit": "",
+   "note": "`rl.enable()` or VOLSURF_RL=1; off because it costs more than the analytic route",
+   "trend": true
+  },
+  {
+   "group": "Reinforcement learning (Session M)",
+   "name": "value iteration against the chain's closed form",
+   "measured": 0.0,
+   "threshold": 1e-12,
+   "ok": true,
+   "unit": "",
+   "note": "V(s) = -min(steps to the end, the jump's cost); absorbing states carry zero",
+   "trend": true
+  },
+  {
+   "group": "Reinforcement learning (Session M)",
+   "name": "the agents recover that exact Q from logged transitions",
+   "measured": 9.334755191048316e-13,
+   "threshold": 1e-08,
+   "ok": true,
+   "unit": "",
+   "note": "the answer key: an agent that fails here is not evidence about a hard problem",
+   "trend": true
+  },
+  {
+   "group": "Reinforcement learning (Session M)",
+   "name": "the Markov test rejects a second-order chain seen through one lag",
+   "measured": 18.831041166679974,
+   "threshold": 5.0,
+   "ok": true,
+   "unit": "%",
+   "note": "the lag block's partial R^2; an AR(2) through a one-lag state must fail",
+   "trend": true
+  },
+  {
    "group": "Engineering",
    "name": "scipy modules on the live import path",
    "measured": 0,
@@ -1233,7 +1273,7 @@
   {
    "group": "Engineering",
    "name": "startup to actionable error, no TWS",
-   "measured": 0.7527922999579459,
+   "measured": 0.7864852999337018,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
@@ -1243,7 +1283,7 @@
   {
    "group": "Engineering",
    "name": "calibration objective evaluation",
-   "measured": 13.704259996302426,
+   "measured": 15.665159979835153,
    "threshold": 200.0,
    "ok": true,
    "unit": "ms",
@@ -1281,7 +1321,7 @@
    "trend": true
   }
  ],
- "seconds": 127.5335091999732,
+ "seconds": 139.4005068000406,
  "python": "3.12.3",
  "numpy": "2.5.2"
 }

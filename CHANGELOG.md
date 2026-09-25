@@ -1,5 +1,55 @@
 # Changelog
 
+## Unreleased: Session M, a reinforcement-learning framework and one way in
+
+Full accounts: `docs/rl-framework.md`, `rl/README.md`, `docs/customising.md`.
+
+### Added
+- **`rl/` -- reinforcement learning, OFF BY DEFAULT** (`rl.enable()`, or VOLSURF_RL=1, or
+  `python volsurf.py rl`). Every entry point refuses until it is on, and the refusal names
+  the switch. The three primitives asked for, and nothing else:
+  - `rl.markov`: the Markov property TESTED, not assumed -- a nested F test on logged
+    trajectories, with the sample size discounted for serially correlated residuals and the
+    lag block's partial R^2 reported beside its p-value, because with a million transitions
+    significance is not size;
+  - `rl.mdp.greedy`: the policy is argmax_a Q(s, a), with deterministic tie-breaking;
+  - `rl.mdp.TabularMDP`: absorbing states carried explicitly, so the terminal payoff cannot
+    be counted twice, and `gamma = 1` with an unreachable terminal is refused rather than
+    run to a divergence.
+
+  Three agents (`fitted-q`, `lspi`, `tabular-q`), one registry decorator for your own, and
+  an ANSWER KEY that runs first: a chain whose value has a closed form, solved exactly by
+  value iteration, which all three recover to 1e-13.
+- **`rl.hedging_env`, and the result.** Graded against Hedged Monte Carlo, which solves the
+  same problem analytically. The agent learns the leverage adjustment -- it holds less than
+  the Black-Scholes delta, as HMC does, and gets about half the distance -- and still leaves
+  **0.354 of the price against HMC's 0.305**. Neither more data (2k to 128k paths: flat) nor
+  a finer grid (3 to 41 actions: flat above 11) closes it. **The reward is quadratic in the
+  action, and HMC solves for the parabola's vertex while the argmax compares noisy
+  neighbours**; when you know the reward's structure, estimate it.
+- **The hedging MDP is a bandit**, which the framework detects: the writer's hedge does not
+  move the market, so the next state does not depend on the action and argmax_a Q =
+  argmax_a R. The myopic agent is better AND twenty times cheaper than the bootstrapped one
+  (0.4 s against 8.7 s). Check that you have an MDP before paying for one.
+- **`rl.filter_env` + `rl.filter_logs`:** filter selection at the zero boundary, learned
+  OFFLINE from logged runs, graded against the written Session I protocol and the converged
+  64-substep particle filter. Choosing the hosts was its own finding: the boundary
+  diagnostic is far more sensitive than the stationary sd suggests (theta 0.045 / xi 0.3
+  flags 100% of days, 0.09 / 0.12 flags none), and the first attempt had nothing to select.
+- **`volsurf.py`, one entry point**: `doctor`, `health`, `test`, `demo`, `pipeline`,
+  `study`, `rl`, `record`. `doctor` in particular checks the two things that break a fresh
+  checkout -- the wrong interpreter and a missing `ibapi` -- both of which used to produce
+  tracebacks pointing somewhere else.
+- **`docs/customising.md`**: the six seams designed to be changed, with examples that run.
+- Four standing health checks for the framework (132 in total), including that it is still
+  off by default and that the Markov test still rejects a state hiding a lag.
+
+### Changed
+- **All three filters report a per-day log-likelihood** (`loglik_t`, summing to `loglik` by
+  construction). Needed by the offline filtering MDP, and a diagnostic in its own right: a
+  total hides WHERE a filter loses, and the zero-boundary work is exactly a question about
+  particular days.
+
 ## v1.1.0 (2026-09-25): Session L, forty-four nodes, a volatility backup, and a trial
 
 Full accounts: `docs/study-lift-44.md`, `docs/study-egarch.md`, `docs/trial-bl-hurst.md`.
