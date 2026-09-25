@@ -283,8 +283,14 @@ def test_pipeline_synthetic():
     check("the surface keeps the quotes and builds short-end anchors", sf["quotes"] > 50 and sf["anchors"] >= 2,
           f"{sf['quotes']} quotes, {sf['anchors']} anchors")
     fp = report["H"]["filter_profile"]
-    check("the history filter recovers the planted H = 0.10 within 3 SE",
-          abs(fp["H"] - truth.H) < 3 * fp["se"], f"H {fp['H']:.3f} +/- {fp['se']:.3f}  ({time.perf_counter()-t0:.0f}s)")
+    # Session L: judged against the estimator's MEASURED spread on 500 days (0.079 over 21
+    # seeds), not the profile curvature's SE, which reads a median 0.028 and understates it
+    # threefold -- see the same correction in test_filters.test_learn_h. What this check is
+    # for is that the pipeline runs end to end and lands near the planted answer; the
+    # estimator's own precision is measured there.
+    check("the history filter recovers the planted H = 0.10 within 2 measured sd (0.079)",
+          abs(fp["H"] - truth.H) < 2 * 0.079,
+          f"H {fp['H']:.3f} (profile se {fp['se']:.3f})  ({time.perf_counter()-t0:.0f}s)")
     check("report.json, report.md and figure.png are written", wrote)
 
 

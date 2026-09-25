@@ -27,7 +27,7 @@ from models.fbm import fbm as _fbm
 import pricing.fourier as fo
 import fit.svi as svi
 from models.heston import HestonParams, char_func, char_func_trap, simulate
-from calibrate.objective import MarketSurface, rmse_vol
+from calibrate.objective import MarketSurface
 from calibrate.fit import (DEFAULT_STARTS, HESTON_TRANSFORM, calibrate_heston,
                            heston_cf_factory, _jacobian)
 
@@ -1003,6 +1003,60 @@ def h_hedging():
                 "complete with both instruments")
 
 
+def h_lift_44():
+    """
+    Session L. Two of these guard an optimisation that could break correctness silently --
+    the solver's carried state and its reused Riccati solution are EXACT, not approximations,
+    and a drifting `DEAD_DECAY` or a stale reuse key would show up here first. The other two
+    are the criteria the lift is chosen against: the kernel error over the H box, and how far
+    the lifted driver's increments sit from the exact fGn they approximate.
+    """
+    import models.rough_heston as rh
+    import study_lift_44 as s44
+    G = "Lift (Session L)"
+    P = rh.RoughHestonParams(0.04, 2.0, 0.045, 0.5, -0.7, 0.12)
+    tau = 30 / 365
+    u = np.linspace(0.0, rh.u_max_for(P, tau), 200) - 0.5j
+
+    saved = rh.DEAD_DECAY
+    worst = 0.0
+    try:
+        for scheme in ("etdrk4", "exptrap"):
+            rh.DEAD_DECAY = saved
+            a = np.exp(rh.log_char_func(u, tau, P, scheme=scheme))
+            rh.DEAD_DECAY = 5e-324              # drop nothing that is not exactly zero
+            b = np.exp(rh.log_char_func(u, tau, P, scheme=scheme))
+            worst = max(worst, float(np.max(np.abs(a - b))))
+    finally:
+        rh.DEAD_DECAY = saved
+    record(G, "carried state: dropping the dead factors changes the cf by", worst, 1e-13, worst < 1e-13,
+           note=f"DEAD_DECAY = {saved:.0e}; the dropped factors' within-step part stays in the coefficients")
+
+    ks = np.linspace(-0.15, 0.15, 7)
+    moved = rh.RoughHestonParams(0.05, P.kappa, 0.03, P.xi, P.rho, P.H)
+    um = 1.25 * rh.u_max_for(P, tau)
+    fresh, _ = rh.lewis_prices(ks, tau, moved, u_max=um)
+    with rh.reuse_riccati() as reuse:
+        rh.lewis_prices(ks, tau, P, u_max=um)
+        reused, _ = rh.lewis_prices(ks, tau, moved, u_max=um)
+    d = float(np.max(np.abs(fresh - reused)))
+    record(G, "reused Riccati solve at new (v0, theta) vs a fresh solve", d, 1e-15, d == 0.0,
+           note=f"{reuse.hits} reuses, {reuse.misses} solves; the log cf is linear in v0 and theta")
+
+    Hs = np.linspace(0.02, 0.49, 24)
+    worst_k = max(rh.kernel_error(H)[0] for H in Hs)
+    record(G, "worst kernel error over the H box on [1 day, 2 y]", 100 * worst_k, 1.0, worst_k < 0.01,
+           unit="%", note=f"the review's criterion; N = {rh.N_DEFAULT} to {rh.ETA_N_DEFAULT:.0e}/y "
+                          f"(N = 40 read 0.908%)")
+
+    c, x = s44.lift_parts(0.12, rh.N_DEFAULT, rh.ETA_N_DEFAULT)
+    h_day = 1.0 / 365
+    err = abs(float(s44.variogram_lift(np.array([h_day]), c, x)[0]) / (s44.v_h(0.12) * h_day ** 0.24) - 1)
+    record(G, "lifted driver's variogram at 1 day vs exact fGn's V_H h^2H (H = 0.12)", 100 * err, 8.0,
+           err < 0.08, unit="%", note="the kernel's sup norm and the increment law are different "
+                                      "criteria; the top node moves this one, the node count barely does")
+
+
 def h_engineering():
     out = subprocess.run(
         [sys.executable, "-c",
@@ -1082,7 +1136,7 @@ CHECKS = [h_timing, h_normal, h_black_scholes, h_finite_difference, h_char_func,
           h_hurst, h_forward, h_svi, h_arbitrage, h_calibration,
           h_fractional_kernel, h_lift, h_rough_robustness, h_identifiability_rough,
           h_hawkes, h_kalman, h_recording, h_positivity, h_lift_fidelity, h_weighting, h_learn_h,
-          h_zero_boundary, h_clock, h_hedging, h_engineering, h_replay]
+          h_zero_boundary, h_clock, h_hedging, h_lift_44, h_engineering, h_replay]
 
 
 def main():

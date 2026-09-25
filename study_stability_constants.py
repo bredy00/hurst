@@ -8,7 +8,7 @@ u in [0, 1200] first exceeds one. The finer lift puts more of the kernel's weigh
 the first seconds, so the edge is measured again here: for each scheme, H and maturity,
 the fewest steps M that keep max |phi| <= 1 + 1e-9, converted to z.
 
-    python study_stability_constants.py [N eta_N]      (default 40 1e8)
+    python study_stability_constants.py [N eta_N]      (default: the default lift)
 """
 
 import math
@@ -44,7 +44,7 @@ def edge(tau, P, scheme, N, eta, umax=1200.0):
     return hi, z_stable, z_unstable
 
 
-def main(N=40, eta=1e8):
+def main(N=rh.N_DEFAULT, eta=rh.ETA_N_DEFAULT):
     print(f"lift N = {N}, eta_N = {eta:g}; shipped constants {rh.C_STAB}")
     out = {}
     for scheme in ("etdrk4", "exptrap"):

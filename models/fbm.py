@@ -106,16 +106,43 @@ def circulant_eigenvalues(n, H):
     return lam
 
 
-def _davies_harte(n, H, rng, size):
-    lam = circulant_eigenvalues(n, H)
-    if n < 2:
-        return rng.standard_normal((size, n))
+def _circulant_draw(lam, n, rng, size):
+    """Steps 3-8 of Shevchenko's algorithm for an embedding with eigenvalues lam >= 0."""
     M = len(lam)
     scale = np.sqrt(lam / M)
     pairs = (size + 1) // 2
     Z = rng.standard_normal((pairs, M)) + 1j * rng.standard_normal((pairs, M))
     Y = np.fft.fft(scale[None, :] * Z, axis=1)[:, :n]
     return np.concatenate([Y.real, Y.imag], axis=0)[:size]
+
+
+def _davies_harte(n, H, rng, size):
+    lam = circulant_eigenvalues(n, H)
+    if n < 2:
+        return rng.standard_normal((size, n))
+    return _circulant_draw(lam, n, rng, size)
+
+
+def stationary_gaussian(acov, n, rng=None, size=None):
+    """
+    n values of the stationary Gaussian sequence with autocovariance acov(k), by the same
+    circulant embedding (Shevchenko's eq. (5) and steps 3-8), for any covariance whose
+    embedding is nonnegative: shape (n,), or (size, n). `acov` is a callable on integer
+    lags. Unlike fGn's, a general embedding can have negative eigenvalues; this raises
+    then, as circulant_eigenvalues does, rather than truncating them (Wood-Chan's
+    approximate fallback). Session L uses it for the lifted kernel's stationary increments.
+    """
+    rng = np.random.default_rng() if rng is None else rng
+    k = 1 if size is None else int(size)
+    M = 2 * _fast_len(max(int(n) - 1, 1))
+    g = np.asarray(acov(np.arange(M // 2 + 1)), dtype=float)
+    c = np.concatenate([g, g[-2:0:-1]])
+    lam = np.fft.fft(c).real
+    if float(lam.min()) < -1e-10 * float(np.abs(lam).max()):
+        raise ArithmeticError(f"circulant embedding not nonnegative at n={n}: min eigenvalue "
+                              f"{lam.min():.3e} (max {lam.max():.3e})")
+    out = _circulant_draw(np.maximum(lam, 0.0), int(n), rng, k)
+    return out[0] if size is None else out
 
 
 def _cholesky(n, H, rng, size):

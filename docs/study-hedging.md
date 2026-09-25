@@ -38,7 +38,9 @@ the lifted model is complete: one Brownian motion drives the price, one the vari
 continuous time the hedge then replicates, so what remains at a finite Δt is the
 discretisation alone, with no floor to hide it.
 
-**The paths.** Lifted rough Heston (40 nodes), QE step, 512 steps a month (1.4 hours),
+**The paths.** Lifted rough Heston (40 nodes, the default when this study ran; 44 since
+Session L, which does not change the increment law — `docs/study-lift-44.md` §2), QE step,
+512 steps a month (1.4 hours),
 v0 = θ = 0.04, κ = 2, ξ = 0.3, ρ = −0.7, and H ∈ {0.05, 0.12, 0.25, 0.45}. A control run
 uses ξ = 0.01, nearly deterministic variance.
 

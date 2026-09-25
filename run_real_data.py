@@ -53,7 +53,6 @@ import sources.replay as replay
 import sources.history as hist
 import calibrate.weights as wt
 from calibrate.objective import MarketSurface, per_expiry_report
-import pricing.fourier as fo
 import models.rough_heston as rh
 
 ROOT = pathlib.Path(__file__).parent
@@ -546,7 +545,7 @@ def main(argv=None):
     ap.add_argument("--max-seconds", type=float, default=900)
     ap.add_argument("--lift", default=None, metavar="N:ETA_N",
                     help="run the whole pipeline on another lift, e.g. 24:1e5 (the Sessions A-H lift); "
-                         "the default is 40:1e8, adopted in Session I")
+                         "the default is 44:1e8 (Session L; Session I's was 40:1e8)")
     args = ap.parse_args(argv)
     if args.lift:
         n_, eta_ = args.lift.split(":")

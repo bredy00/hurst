@@ -678,7 +678,7 @@ def kalman_filter(model, p, y, policy=None, x0=None, P0=None):
     and loglik (the prediction-error decomposition, constant included).
 
     Joseph-form covariance update, (I - K H) P (I - K H)' + K R K', so P stays
-    symmetric positive semi-definite for the 40-factor rough model too.
+    symmetric positive semi-definite for the 44-factor rough model too.
     """
     policy = Strict() if policy is None else policy
     policy.reset()

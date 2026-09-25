@@ -7,7 +7,7 @@ time: predict with the affine transition CF, update by Bayes' rule in Fourier sp
 and approximate the posterior by a gamma law matched to its first two moments. The
 likelihood of each observation is an exact Fourier integral, so the non-Gaussian
 shape of the predictive distribution -- the part a Kalman filter throws away -- is
-kept. The lifted state here has 40 factors, not one, so the posterior is carried as
+kept. The lifted state here has 44 factors, not one, so the posterior is carried as
 
     V_t ~ Gamma(k_t, s_t)                                   (the boundary lives here)
     U_t | V_t ~ N(m_t + beta_t (V_t - E V_t), P_t),  P_t w = 0 (so v0 + w'U_t = V_t)

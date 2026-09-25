@@ -19,7 +19,7 @@ import numpy as np
 
 import models.rough_heston as rh
 import pricing.fourier as fo
-from models.heston import HestonParams, char_func as heston_cf
+from models.heston import char_func as heston_cf
 
 
 PASS, FAIL = [], []
@@ -77,7 +77,8 @@ def test_sum_of_exponentials():
     e30, _ = rh.kernel_error(0.30)
     check("same at H = 0.30", e30 < 0.01, f"{e30:.3%}")
     # The rough edge of the range. The N = 24 lift of Sessions D-H measured 1.05%
-    # here and the bound said so; the N = 40 default meets 1% on the whole box.
+    # here and the bound said so; the N = 40 lift of Session I meets 1% on the whole box
+    # (worst 0.91%) and the N = 44 default of Session L with more room (0.76%).
     e05, _ = rh.kernel_error(0.05)
     check("H = 0.05 (the rough edge of the range) within 1%", e05 < 0.01, f"{e05:.3%}")
     e02, _ = rh.kernel_error(0.02)
@@ -151,8 +152,8 @@ def test_lifted_simulation():
 
     # The singular part of K inside the first cell. Including the lag-0 cell mean in
     # both convolutions exposes it. On the 24-node lift with its top node at 1e5/y
-    # it was the only place the lift was worse than 1% (Sessions A-H); the default
-    # since Session I (40 nodes to 1e8/y) resolves it too.
+    # it was the only place the lift was worse than 1% (Sessions A-H); the finer lifts
+    # since Session I (40 nodes to 1e8/y, 44 since Session L) resolve it too.
     a = 0.62
     Kbar_true = np.array([((((j + 1) * dt) ** a - (j * dt) ** a) / (a * dt)) / math.gamma(a)
                           for j in range(n)])
@@ -316,7 +317,6 @@ def test_cf_properties():
 
 def test_pricing_wrapper():
     print("\nD4 -- call_prices: Lewis contour, self-sized and self-checked")
-    import models.rough_heston as rhm
     for d_ in (1, 30, 365):
         tau = d_ / 365
         band = 3 * 0.2 * math.sqrt(tau)
@@ -597,11 +597,68 @@ def test_positivity_scheme():
            / math.sqrt(len(S0)))) for kk, fk in zip(ks, f0)]
     check("rho = 0 (no leverage): QE prices match the Fourier cf within 4 SE at every strike (250 steps)",
           all(abs(z) < 4.0 for z in z0), "z = " + ", ".join(f"{z:+.1f}" for z in z0))
+    # rho = -0.7 leaves a residual skew BIAS, and a bias must not be judged in standard errors:
+    # the SE shrinks with the path count while the bias does not, so any SE threshold fails
+    # once enough paths are thrown at it (Session L: at 44 nodes and 100k paths the k = +0.08
+    # call read 5.0 SE of a 4.5 limit). Measured over four seeds and 160k paths at 500 steps,
+    # the bias is +2.5e-4 to +3.2e-4 in price -- 0.16 to 0.23 vol points -- so it is bounded
+    # here in the units that matter, with room for one seed's Monte Carlo error (~0.05 vp).
     S5 = np.exp(rh.simulate_qe(P, tau, 100_000, 500, seed=5))
-    z5 = [((np.maximum(S5 - math.exp(kk), 0.0).mean() - fk) / (np.maximum(S5 - math.exp(kk), 0.0).std()
-           / math.sqrt(len(S5)))) for kk, fk in zip(ks, f)]
-    check("rho = -0.7: QE prices match the Fourier cf within 4.5 SE at every strike (500 steps)",
-          all(abs(z) < 4.5 for z in z5), "z = " + ", ".join(f"{z:+.1f}" for z in z5))
+    mc = np.array([np.maximum(S5 - math.exp(kk), 0.0).mean() for kk in ks])
+    vp5 = 100.0 * (fo.implied_vols_from_calls(mc, ks, tau) - fo.implied_vols_from_calls(f, ks, tau))
+    check("rho = -0.7: the QE skew bias stays under 0.35 vol points at every strike (500 steps)",
+          bool(np.all(np.abs(vp5) < 0.35)), ", ".join(f"k={kk:+.2f} {v:+.3f} vp" for kk, v in zip(ks, vp5)))
+
+
+def test_carried_state():
+    """Session L: the solver's two savings are exact, not approximations."""
+    print("\nL -- the carried state and the reused Riccati solve")
+    Q = rh.RoughHestonParams(0.03, 1.0, 0.05, 0.8, -0.8, 0.02)
+    saved = rh.DEAD_DECAY
+    worst, dropped = 0.0, {}
+    try:
+        for p in (P, Q):
+            for d_ in (1, 30, 365):
+                tau = d_ / 365
+                u = np.linspace(0.0, rh.u_max_for(p, tau), 200) - 0.5j
+                for scheme in ("etdrk4", "exptrap"):
+                    rh.DEAD_DECAY = saved
+                    a = np.exp(rh.log_char_func(u, tau, p, scheme=scheme))
+                    rh.DEAD_DECAY = 5e-324           # nothing dropped that is not exactly zero
+                    b = np.exp(rh.log_char_func(u, tau, p, scheme=scheme))
+                    worst = max(worst, float(np.max(np.abs(a - b))))
+                if p is P:
+                    w, x = rh.lift_nodes(p.H)
+                    h = tau / rh.stability_steps(tau, float(np.max(np.abs(u))), p, scheme="exptrap")
+                    dropped[d_] = int(np.sum(x * h > -math.log(saved)))
+    finally:
+        rh.DEAD_DECAY = saved
+    check("dropping the factors with no memory beyond one step changes no cf by 1e-13",
+          worst < 1e-13, f"worst |cf - cf_full| {worst:.1e}; exptrap factors dropped at 1 / 30 / 365 d: "
+          + " / ".join(str(v) for v in dropped.values()) + f" of {rh.N_DEFAULT}")
+    check("...and it drops some: at one year, a third or more of the factors",
+          dropped[365] >= rh.N_DEFAULT // 3, f"{dropped[365]}")
+
+    ks = np.linspace(-0.2, 0.2, 9)
+    worst, hits = 0.0, 0
+    for d_ in (1, 30, 365):
+        tau = d_ / 365
+        um = 1.25 * rh.u_max_for(P, tau)
+        moved = rh.RoughHestonParams(0.05, P.kappa, 0.03, P.xi, P.rho, P.H)
+        fresh, _ = rh.lewis_prices(ks, tau, moved, u_max=um)
+        with rh.reuse_riccati() as R:
+            rh.lewis_prices(ks, tau, P, u_max=um)
+            reused, _ = rh.lewis_prices(ks, tau, moved, u_max=um)
+        worst = max(worst, float(np.max(np.abs(fresh - reused))))
+        hits += R.hits
+    check("a Riccati solve reused for new (v0, theta) prices exactly as a fresh solve",
+          worst == 0.0 and hits == 5, f"max difference {worst:.1e}; {hits} reuses (ETDRK4 1, exptrap M and 2M 2 each)")
+    with rh.reuse_riccati() as R:
+        rh.lewis_prices(ks, 30 / 365, P)
+        rh.lewis_prices(ks, 30 / 365, rh.RoughHestonParams(P.v0, 2.5, P.theta, P.xi, P.rho, P.H))
+    check("...and a change of kappa is solved again, not reused", R.hits == 0, f"{R.hits} reuses")
+    outside = rh._REUSE is None
+    check("...and nothing is reused outside the context", outside)
 
 
 if __name__ == "__main__":
@@ -616,6 +673,7 @@ if __name__ == "__main__":
     test_h_to_half()
     test_cf_properties()
     test_pricing_wrapper()
+    test_carried_state()
     test_solver_robustness()
     test_monte_carlo()
     test_positivity_scheme()

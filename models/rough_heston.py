@@ -34,6 +34,7 @@ Conventions match the rest of the package: X = log(S_tau / F) under the forward
 measure, cf(u) = E[exp(i u X_tau)], so cf(0) = 1 and cf(-i) = 1. Numpy only.
 """
 
+import collections
 import math
 from dataclasses import dataclass
 
@@ -102,10 +103,11 @@ def mu_first_moment(lo, hi, H):
 
 
 # ------------------------------------------------------ D2: sum of exponentials
-# The lift (Session I): N = 40 nodes, fastest at 1e8/y (0.4 s). Sessions D-H shipped
-# N = 24 at 1e5/y (7 minutes); study_finer_lift.py and docs/comparison-finer-lift.pdf
-# measured the change and Akin adopted it on 18 September 2026.
-N_DEFAULT = 40
+# The lift: N = 44 nodes, fastest at 1e8/y (0.3 s), since Session L (25 September 2026:
+# study_lift_44.py; worst kernel error on the H box 0.76%, was 0.91%). Session I (18
+# September) adopted N = 40 to 1e8/y after study_finer_lift.py and
+# docs/comparison-finer-lift.pdf; Sessions D-H shipped N = 24 at 1e5/y (7 minutes).
+N_DEFAULT = 44
 ETA_N_DEFAULT = 1.0e8
 
 
@@ -135,11 +137,14 @@ def lift_nodes(H, N=N_DEFAULT, eta_1=0.1, eta_N=ETA_N_DEFAULT):
       day, 1-day prices 0.15 vp off true rough Heston, and a calibration to a
       surface priced by the true model returned H = 0.1145 for 0.12 and 0.0409
       for 0.05, with residuals of 0.006 vp that hid it. Adding nodes under the
-      same top node (N = 32) changed none of that. The default since Session I
-      is N = 40 up to eta_N = 1e8 (0.4 s): kernel error under 0.91% on both
-      [1 hour, 2 y] and [1 day, 2 y] for every H in [0.02, 0.5], 1-day prices
-      within 0.034 vp, isometry 5.1% short at a day, calibrated H 0.1199 and
-      0.0498, for 1.4x the objective's cost.
+      same top node (N = 32) changed none of that. Session I moved to N = 40
+      up to eta_N = 1e8 (0.3 s): kernel error under 0.91% on both [1 hour, 2 y]
+      and [1 day, 2 y] for every H in [0.02, 0.5], 1-day prices within 0.034
+      vp, isometry 5.1% short at a day, calibrated H 0.1199 and 0.0498, for
+      1.4x the objective's cost. The default since Session L is N = 44 to the
+      same top node: worst kernel error 0.76% on the box (study_lift_44.py),
+      at no extra cost to the pricer, whose carried state drops the factors
+      with no memory beyond one step (DEAD_DECAY).
     - The published r_n = 1 + 10 n^(-0.9) geometric rule, designed for the
       n -> infinity limit, gives 27% at n = 20 on the pricing range and is not
       used.
@@ -607,8 +612,8 @@ class LiftedAffineStep:
         Sessions G-H used h/2, the slope for a variance that moves linearly across
         the step. A rough variance does not: its surprise over a step sits mostly in
         the last instants, which add little to I. Measured at h = 1e-3 y the exact
-        slope is 0.79 h/2 on the N = 24 lift and 0.645 h/2 on the N = 40 default
-        (Session I), so h/2 overstated I's co-movement with V_h by 26% and 55%. This
+        slope is 0.79 h/2 on the N = 24 lift and 0.645 h/2 on the Session I default
+        (N = 40), so h/2 overstated I's co-movement with V_h by 26% and 55%. This
         is a correction to the conditional law of I, not the fix for the finer lift's
         price bias: that came from inadmissible factor states (see NOISE_SCALE).
         """
@@ -830,7 +835,9 @@ def _phi123(c):
 #   N = 40, 1e8 (Session I,   etdrk4 edge 4.25 (H = 0.12); stable at 3.0, blows up at
 #   study_stability_           4.0 (H = 0.02)
 #   constants.py)             exptrap edge 14.5 (H = 0.02), 18.8 (H = 0.12), bisected
-# The constants in use sit below every edge on both lifts: 2.0 and 12.0.
+#   N = 44, 1e8 (Session L)   etdrk4 edge 4.23-4.28 (H = 0.12); exptrap edge 14.45
+#                             (H = 0.02), 18.75-18.82 (H = 0.12): the same edges
+# The constants in use sit below every edge on all three lifts: 2.0 and 12.0.
 C_STAB = {"etdrk4": 2.0, "exptrap": 12.0}
 
 
@@ -936,6 +943,59 @@ AUTO_EXPTRAP_STEPS = 120      # accuracy floor for exptrap + Richardson in 'auto
 # 203 us. Richardson runs exptrap at M and 2M, i.e. 3M steps.
 COST_PER_STEP = {"etdrk4": 1.36, "exptrap": 1.0}
 
+# A factor whose decay over one step, e^{-x_i h} (e^{-x_i h / 2} for ETDRK4's half-step
+# stages), is below this at every step of the mesh carries nothing into the next step: the
+# next stage sums read its state only through that factor. log_char_func keeps such a factor
+# in every within-step coefficient and drops it from the carried state (Session L). On the
+# 44-node lift that is 5-8 of the 44 at one day and 20 of them at one year.
+DEAD_DECAY = 1e-30
+
+_REUSE = None                 # the active reuse_riccati, if any
+
+
+class reuse_riccati:
+    """
+    Context manager: inside it, log_char_func keeps its last `maxsize` Riccati solutions and
+    reuses one when only v0 or theta changed.
+
+    The Riccati system for psi never sees v0 or theta. They enter the log cf linearly,
+    phi = kappa theta I_A + v0 I_B, where I_A and I_B are the scheme's own quadratures of Psi
+    and F(Psi), so a solution can be reused exactly for any (v0, theta). A calibration's
+    forward-difference Jacobian perturbs one coordinate at a time, so two of its six rough
+    columns need no solve at all. Only calibrate_rough_heston turns it on: outside it every
+    call solves, and the health check's timings measure solves. `hits` and `misses` count.
+    """
+
+    def __init__(self, maxsize=64):
+        self.maxsize = int(maxsize)
+        self.store = collections.OrderedDict()
+        self.hits = self.misses = 0
+        self._saved = None
+
+    def __enter__(self):
+        global _REUSE
+        self._saved = _REUSE
+        _REUSE = self
+        return self
+
+    def __exit__(self, *exc):
+        global _REUSE
+        _REUSE = self._saved
+
+    def get(self, key):
+        hit = self.store.get(key)
+        if hit is None:
+            self.misses += 1
+            return None
+        self.store.move_to_end(key)
+        self.hits += 1
+        return hit
+
+    def put(self, key, value):
+        self.store[key] = value
+        if len(self.store) > self.maxsize:
+            self.store.popitem(last=False)
+
 
 def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
                   scheme="etdrk4", c_stab=None, check_stability=True, eta_N=ETA_N_DEFAULT):
@@ -1011,11 +1071,21 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
                 f"|u| <= {u_abs:.0f} (H={H:.3f}, xi={xi:.3f}, rho={rho:.3f}, kappa={kappa:.3f}); "
                 f"needs >= {stability_steps(tau, u_abs, p, grade, min_steps=1, c_stab=c_stab, scheme=scheme)}"
                 f" steps, got {M}")
+    key = None
+    if _REUSE is not None:
+        key = (scheme, M, float(grade), float(tau), float(H), float(kappa), float(xi), float(rho),
+               w.tobytes(), x.tobytes(), u.tobytes())
+        hit = _REUSE.get(key)
+        if hit is not None:
+            phi = kt * hit[0] + v0 * hit[1]
+            return phi.reshape(np.shape(u)) if np.ndim(u) else phi
     c = -np.outer(hs, x)                     # (M, N)
     E = np.exp(c)
     n_u = len(u)
-    psi = np.zeros((len(w), n_u), dtype=complex)
-    phi = np.zeros(n_u, dtype=complex)
+    # phi = kt * IA + v0 * IB: IA and IB are the scheme's quadratures of Psi and F(Psi),
+    # which do not depend on v0 or theta (reuse_riccati)
+    IA = np.zeros(n_u, dtype=complex)
+    IB = np.zeros(n_u, dtype=complex)
     Psi = np.zeros(n_u, dtype=complex)
 
     if scheme == "etdrk4":
@@ -1030,6 +1100,13 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
         wE = E * w[None, :]
         wE2 = E2 * w[None, :]
         wA1, wA2, wA3 = A1 @ w, A2 @ w, A3 @ w
+        # The carried state holds only the factors with memory beyond one step
+        # (DEAD_DECAY): the next step reads the others only through wE and wE2, which
+        # are below 1e-30 for them, and their within-step part is already in s_h, s_h2
+        # and wA. e^{-x h / 2} is the larger decay, so it decides.
+        live = np.max(0.5 * c, axis=0) > math.log(DEAD_DECAY)
+        E, wE, wE2 = E[:, live], wE[:, live], wE2[:, live]
+        psi = np.zeros((int(live.sum()), n_u), dtype=complex)
         # Both products in this loop are REAL matrix products on interleaved views
         # of the complex arrays (Session I). The weights are real, so w @ psi is two
         # real contractions, one per part; viewing psi (N, n_u) complex as (N, 2 n_u)
@@ -1037,16 +1114,16 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
         # u-nodes: 14 us against 123 us for einsum and 141 us for the complex
         # matmul (Session E chose einsum over the latter's ~80 us of thread
         # dispatch). The rank-3 update goes the same way onto psi's own memory.
-        Astack = np.ascontiguousarray(np.stack([A1, A2, A3], axis=2))    # (M, N, 3)
+        Astack = np.ascontiguousarray(np.stack([A1[:, live], A2[:, live], A3[:, live]],
+                                               axis=2))                  # (M, N_live, 3)
         Vbuf = np.empty((3, n_u), dtype=complex)
         Vr = Vbuf.view(np.float64)                   # (3, 2 n_u)
-        pr = psi.view(np.float64)                    # (N, 2 n_u), the same memory as psi
+        pr = psi.view(np.float64)                    # (N_live, 2 n_u), the same memory as psi
         for j in range(M):
-            h = hs[j]
+            h6 = hs[j] / 6.0
             S2 = (wE2[j] @ pr).view(complex)
             S1 = (wE[j] @ pr).view(complex)
             Nu = F(Psi)
-            Gu = kt * Psi + v0 * Nu
             Pa = S2 + s_h[j] * Nu
             Na = F(Pa)
             Pb = S2 + s_h[j] * Na
@@ -1054,14 +1131,17 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
             Pc = S1 + s_h2[j] * Nu + s_h[j] * (2.0 * Nb - Nu)
             Nc = F(Pc)
             Nab = Na + Nb
+            IA += h6 * (Psi + 2.0 * (Pa + Pb) + Pc)
+            IB += h6 * (Nu + 2.0 * Nab + Nc)
             pr *= E[j][:, None]
             Vbuf[0] = Nu
             Vbuf[1] = Nab
             Vbuf[2] = Nc
             pr += Astack[j] @ Vr
             Psi = S1 + wA1[j] * Nu + wA2[j] * Nab + wA3[j] * Nc
-            phi += (h / 6.0) * (Gu + 2.0 * (kt * (Pa + Pb) + v0 * Nab)
-                                + kt * Pc + v0 * Nc)
+        if key is not None:
+            _REUSE.put(key, (IA, IB))
+        phi = kt * IA + v0 * IB
         return phi.reshape(np.shape(u)) if np.ndim(u) else phi
 
     if scheme != "exptrap":
@@ -1079,9 +1159,12 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
     a0 = B0 @ w
     a1 = B1 @ w
     Fn = F(Psi)
+    live = np.max(c, axis=0) > math.log(DEAD_DECAY)       # carried state, as for ETDRK4
+    E, wE = E[:, live], wE[:, live]
+    psi = np.zeros((int(live.sum()), n_u), dtype=complex)
     # real products on interleaved views, as in the ETDRK4 loop; the rank-2 update
     # was two np.outer calls plus adds, 830 us at N = 40 and 576 u-nodes -> 46 us
-    Bstack = np.ascontiguousarray(np.stack([B0, B1], axis=2))       # (M, N, 2)
+    Bstack = np.ascontiguousarray(np.stack([B0[:, live], B1[:, live]], axis=2))  # (M, N_live, 2)
     Fbuf = np.empty((2, n_u), dtype=complex)
     Fr = Fbuf.view(np.float64)
     pr = psi.view(np.float64)
@@ -1102,8 +1185,12 @@ def log_char_func(u, tau, p, N=N_DEFAULT, steps=None, steps_mult=1.0, grade=1.0,
         Fbuf[1] = Fn1
         pr += Bstack[j] @ Fr
         # trapezoid on phi' = kt Psi + v0 F(Psi)
-        phi += 0.5 * h * ((kt * Psi + v0 * Fn) + (kt * Pn1 + v0 * Fn1))
+        IA += 0.5 * h * (Psi + Pn1)
+        IB += 0.5 * h * (Fn + Fn1)
         Psi, Fn = Pn1, Fn1
+    if key is not None:
+        _REUSE.put(key, (IA, IB))
+    phi = kt * IA + v0 * IB
     return phi.reshape(np.shape(u)) if np.ndim(u) else phi
 
 

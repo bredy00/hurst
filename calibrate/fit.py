@@ -349,7 +349,8 @@ KERNEL_TOL = 0.01           # max relative kernel error on [1 day, 2 y], strictl
 # Sessions G-H refined a fit that landed below H ~ 0.08 from N = 24 to N = 32 nodes.
 # The Session I default lift (N = 40, top node 1e8) meets KERNEL_TOL on the whole box
 # (worst 0.91% at H = 0.02), and N = 32 had changed nothing measurable anyway (the
-# calibrated-H bias was identical to N = 24's), so the refinement is gone.
+# calibrated-H bias was identical to N = 24's), so the refinement is gone. The Session L
+# default (N = 44, same top node) meets it with a quarter to spare (worst 0.76%).
 
 
 def verify_stability(p, surface, N=rh.N_DEFAULT, tail_tol=1e-9):
@@ -402,13 +403,16 @@ def calibrate_rough_heston(surface, starts=DEFAULT_ROUGH_STARTS, tail_tol=1e-9,
     """
     lm_kw.setdefault("step", 1e-3)
     pricer = RoughPricerFactory(tail_tol, N)
-    with blas_single_thread():
+    # The Jacobian's v0 and theta columns reuse the base point's Riccati solutions
+    # (rh.reuse_riccati: the log cf is linear in both), so they cost no solve.
+    with blas_single_thread(), rh.reuse_riccati() as reuse:
         res = calibrate(surface, pricer.cf_factory, ROUGH_TRANSFORM, starts,
                         tol=tail_tol, prior=prior, prior_weight=prior_weight,
                         pricer=pricer.pricer, **lm_kw)
     p = res["params"]
     res["kernel_error"] = rh.kernel_error(p.H, N)[0]
-    res["pricer_stats"] = dict(pricer.pricer.stats)
+    res["pricer_stats"] = dict(pricer.pricer.stats, riccati_reused=reuse.hits,
+                               riccati_solved=reuse.misses)
     res["N"] = N
     res["kernel_ok"] = res["kernel_error"] < KERNEL_TOL
     res["stability"] = verify_stability(p, surface, N, tail_tol)

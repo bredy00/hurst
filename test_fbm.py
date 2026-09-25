@@ -163,6 +163,31 @@ def test_erratum():
           f"max error {e_text:.3f}; variance {d[0]:.3f} at k = 0, {d[n // 2]:.3f} at k = {n // 2}")
 
 
+def test_stationary_gaussian():
+    """Session L: the same circulant embedding for any stationary covariance."""
+    print("\nL -- stationary_gaussian: Shevchenko's embedding for a general covariance")
+    for H in (0.1, 0.7):
+        a = fb.fgn(3000, H, rng=np.random.default_rng(3), size=5)
+        b = fb.stationary_gaussian(lambda k: fb.autocovariance(k, H), 3000, rng=np.random.default_rng(3), size=5)
+        check(f"with fGn's covariance it IS fgn(), draw for draw (H = {H})", np.array_equal(a, b))
+    # an AR(1) covariance: known, and not fGn
+    phi, n, m = 0.8, 2048, 4000
+    x = fb.stationary_gaussian(lambda k: phi ** np.abs(k) / (1 - phi * phi), n, rng=np.random.default_rng(4), size=m)
+    lag0 = float(np.mean(x * x))
+    lag1 = float(np.mean(x[:, 1:] * x[:, :-1]))
+    se0 = math.sqrt(2.0 / (1 - phi * phi) ** 2 * (1 + phi * phi) / (1 - phi * phi) / (n * m))
+    check("an AR(1) covariance is reproduced at lags 0 and 1",
+          abs(lag0 - 1 / (1 - phi * phi)) < 4 * se0 and abs(lag1 - phi / (1 - phi * phi)) < 4 * se0,
+          f"lag 0 {lag0:.4f} (exact {1 / (1 - phi * phi):.4f}), lag 1 {lag1:.4f} (exact {phi / (1 - phi * phi):.4f}), SE ~{se0:.4f}")
+    try:
+        fb.stationary_gaussian(lambda k: np.where(np.abs(k) == 1, 0.9, np.where(k == 0, 1.0, 0.0)), 64,
+                               rng=np.random.default_rng(0))
+        refused = False
+    except ArithmeticError:
+        refused = True
+    check("a covariance with no nonnegative embedding is refused, not truncated", refused)
+
+
 if __name__ == "__main__":
     print("=" * 74)
     print("Session I -- fGn and fBm, exactly")
@@ -173,6 +198,7 @@ if __name__ == "__main__":
     test_scaling()
     test_estimation()
     test_erratum()
+    test_stationary_gaussian()
     print("\n" + "=" * 74)
     print(f"{len(PASS)} passed, {len(FAIL)} failed")
     for f in FAIL:
