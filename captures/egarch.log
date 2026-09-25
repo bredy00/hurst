@@ -1,0 +1,70 @@
+[control: EGARCH(1,1)-t data, nu = 7] BIC and out-of-sample QLIKE against the true conditional variance:
+  EGARCH(1,1)-t          BIC  -12875.9  nu    7.8  QLIKE 0.0040
+  Beta-t-EGARCH(1,1)     BIC  -12867.9  nu    7.0  QLIKE 0.0046
+  GARCH(1,1)-t           BIC  -12861.8  nu    6.9  QLIKE 0.0255
+  EGARCH(1,1)-normal     BIC  -12835.7  nu    inf  QLIKE 0.0046
+  GARCH(1,1)-normal      BIC  -12805.4  nu    inf  QLIKE 0.0261
+  out of sample the best is EGARCH(1,1)-t
+simulated 2520 days of rough Heston (H = 0.1, xi = 0.4, rho = -0.7) in 55s: daily vol 0.179, corr(RV, IV) 0.977, return kurtosis 21.54
+
+[rough Heston] scan on 1764 days, scored on 756 (19s)
+  Beta-t-EGARCH(1,1)     loglik    6314.0  k 5  BIC  -12590.6  persistence 0.9292  nu    2.4  QLIKE vs IV 0.9323, vs RV 1.1097
+  EGARCH(1,1)-t          loglik    6300.3  k 5  BIC  -12563.1  persistence 0.9401  nu    2.2  QLIKE vs IV 1.0486, vs RV 1.2232
+  GARCH(1,1)-t           loglik    6295.9  k 4  BIC  -12561.9  persistence 1.0000  nu    3.1  QLIKE vs IV 0.7983, vs RV 0.9952
+  EGARCH(2,1)-t          loglik    6303.3  k 6  BIC  -12561.6  persistence 0.9337  nu    2.3  QLIKE vs IV 1.0113, vs RV 1.1863
+  EGARCH(1,2)-t          loglik    6305.0  k 7  BIC  -12557.7  persistence 0.9530  nu    2.3  QLIKE vs IV 0.9927, vs RV 1.1682
+  EGARCH(2,2)-t          loglik    6306.2  k 8  BIC  -12552.5  persistence 0.9754  nu    2.3  QLIKE vs IV 0.9676, vs RV 1.1437
+  GARCH(1,1)-normal      loglik    5899.0  k 3  BIC  -11775.5  persistence 1.0000  nu    inf  QLIKE vs IV 0.7346, vs RV 0.9234
+  EGARCH(1,1)-normal     loglik    5819.2  k 4  BIC  -11608.6  persistence 0.9700  nu    inf  QLIKE vs IV 0.8202, vs RV 1.0088
+  EGARCH(2,1)-normal     loglik    5809.3  k 5  BIC  -11581.2  persistence 0.9730  nu    inf  QLIKE vs IV 0.8252, vs RV 1.0132
+  EGARCH(1,2)-normal     loglik    5793.3  k 6  BIC  -11541.8  persistence 0.9700  nu    inf  QLIKE vs IV 0.8641, vs RV 1.0549
+  EGARCH(2,2)-normal     loglik    5783.7  k 7  BIC  -11515.2  persistence 0.9730  nu    inf  QLIKE vs IV 0.8679, vs RV 1.0580
+  BIC picks Beta-t-EGARCH(1,1): omega -5.287 (0.089), phi 0.9292 (0.012), kappa 0.2118 (0.021), kappa_s 0.07403 (0.012), nu 2.373 (0.16)
+  out of sample, QLIKE (lower is better; DM > 0: worse than GARCH(1,1)-normal, the best returns-only model):
+    HAR-RV (uses RV)       vs IV 0.6108 (DM -4.8)   vs RV 0.7953 (DM -4.3)
+    GARCH(1,1)-normal      vs IV 0.7346 (reference)   vs RV 0.9234
+    GARCH(1,1)-t           vs IV 0.7983 (DM +2.4)   vs RV 0.9952 (DM +2.4)
+    EGARCH(1,1)-normal     vs IV 0.8202 (DM +3.3)   vs RV 1.0088 (DM +3.2)
+    EGARCH(2,1)-normal     vs IV 0.8252 (DM +3.4)   vs RV 1.0132 (DM +3.2)
+    EGARCH(1,2)-normal     vs IV 0.8641 (DM +4.3)   vs RV 1.0549 (DM +4.2)
+    EGARCH(2,2)-normal     vs IV 0.8679 (DM +4.4)   vs RV 1.0580 (DM +4.2)
+    EWMA (0.94)            vs IV 0.8756 (DM +3.9)   vs RV 1.0698 (DM +3.8)
+    Beta-t-EGARCH(1,1)     vs IV 0.9323 (DM +5.2)   vs RV 1.1097 (DM +4.4)
+    EGARCH(2,2)-t          vs IV 0.9676 (DM +6.1)   vs RV 1.1437 (DM +5.3)
+    EGARCH(1,2)-t          vs IV 0.9927 (DM +6.4)   vs RV 1.1682 (DM +5.6)
+    EGARCH(2,1)-t          vs IV 1.0113 (DM +6.7)   vs RV 1.1863 (DM +5.9)
+    EGARCH(1,1)-t          vs IV 1.0486 (DM +7.4)   vs RV 1.2232 (DM +6.6)
+  the best returns-only model's QLIKE is 1.20x HAR-RV's against the true variance
+
+added 122 jumps over 2520 days: return kurtosis 16.36
+
+[rough Heston + jumps] scan on 1764 days, scored on 756 (37s)
+  Beta-t-EGARCH(1,1)     loglik    6022.6  k 5  BIC  -12007.8  persistence 0.9360  nu    2.1  QLIKE vs IV 2.3463, vs RV 2.5035
+  EGARCH(1,1)-t          loglik    5934.2  k 5  BIC  -11831.1  persistence 0.9730  nu    2.1  QLIKE vs IV 2.3076, vs RV 2.4652
+  EGARCH(2,2)-t          loglik    5945.0  k 8  BIC  -11830.1  persistence 0.9988  nu    2.1  QLIKE vs IV 2.3035, vs RV 2.4605
+  EGARCH(2,1)-t          loglik    5936.2  k 6  BIC  -11827.5  persistence 0.9674  nu    2.1  QLIKE vs IV 2.3017, vs RV 2.4590
+  EGARCH(1,2)-t          loglik    5938.9  k 7  BIC  -11825.5  persistence 0.9857  nu    2.1  QLIKE vs IV 2.1014, vs RV 2.2587
+  GARCH(1,1)-t           loglik    5915.0  k 4  BIC  -11800.2  persistence 1.0000  nu    2.5  QLIKE vs IV 1.3232, vs RV 1.4961
+  EGARCH(1,1)-normal     loglik    5201.6  k 4  BIC  -10373.2  persistence 0.9226  nu    inf  QLIKE vs IV 1.2575, vs RV 1.4230
+  EGARCH(1,2)-normal     loglik    5206.6  k 6  BIC  -10368.4  persistence 0.9217  nu    inf  QLIKE vs IV 1.2469, vs RV 1.4119
+  GARCH(1,1)-normal      loglik    5193.3  k 3  BIC  -10364.2  persistence 0.8428  nu    inf  QLIKE vs IV 1.2047, vs RV 1.3696
+  EGARCH(2,1)-normal     loglik    4995.8  k 5  BIC   -9954.2  persistence 0.9730  nu    inf  QLIKE vs IV 1.2643, vs RV 1.4332
+  EGARCH(2,2)-normal     loglik    4989.3  k 7  BIC   -9926.2  persistence 0.9730  nu    inf  QLIKE vs IV 1.3222, vs RV 1.4931
+  BIC picks Beta-t-EGARCH(1,1): omega -5.337 (0.088), phi 0.936 (0.012), kappa 0.2026 (0.022), kappa_s 0.06203 (0.012), nu 2.05 (0.13)
+  out of sample, QLIKE (lower is better; DM > 0: worse than GARCH(1,1)-normal, the best returns-only model):
+    GARCH(1,1)-normal      vs IV 1.2047 (reference)   vs RV 1.3696
+    HAR-RV (uses RV)       vs IV 1.2253 (DM +0.7)   vs RV 1.3903 (DM +0.7)
+    EGARCH(1,2)-normal     vs IV 1.2469 (DM +1.8)   vs RV 1.4119 (DM +1.8)
+    EGARCH(1,1)-normal     vs IV 1.2575 (DM +1.9)   vs RV 1.4230 (DM +1.9)
+    EGARCH(2,1)-normal     vs IV 1.2643 (DM +0.9)   vs RV 1.4332 (DM +1.0)
+    EWMA (0.94)            vs IV 1.3152 (DM +1.2)   vs RV 1.4843 (DM +1.3)
+    EGARCH(2,2)-normal     vs IV 1.3222 (DM +1.3)   vs RV 1.4931 (DM +1.4)
+    GARCH(1,1)-t           vs IV 1.3232 (DM +1.3)   vs RV 1.4961 (DM +1.3)
+    EGARCH(1,2)-t          vs IV 2.1014 (DM +12.3)   vs RV 2.2587 (DM +12.0)
+    EGARCH(2,1)-t          vs IV 2.3017 (DM +14.4)   vs RV 2.4590 (DM +14.1)
+    EGARCH(2,2)-t          vs IV 2.3035 (DM +15.4)   vs RV 2.4605 (DM +15.0)
+    EGARCH(1,1)-t          vs IV 2.3076 (DM +14.5)   vs RV 2.4652 (DM +14.2)
+    Beta-t-EGARCH(1,1)     vs IV 2.3463 (DM +14.3)   vs RV 2.5035 (DM +14.1)
+  the best returns-only model's QLIKE is 0.98x HAR-RV's against the true variance
+
+[done in 111s] -> C:\Projects\volatility-surface-tuning\captures\egarch.json
