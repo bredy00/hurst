@@ -150,13 +150,17 @@ three. The check now uses the measured spread.
 | N = 40 | +1.40e-4 (3.6 SE) | +1.58e-4 (4.1 SE) |
 | N = 44 | +2.26e-4 (5.8 SE) | +1.42e-4 (3.7 SE) |
 
-The bias is real, documented from Session I, and slightly larger on the finer lift at a given
-step count — which is the expected direction, since more kernel mass sits in the first
-instants, where the QE draw is least accurate. But the threshold was the wrong instrument:
-**the standard error shrinks with the path count while a bias does not**, so any SE-based
-limit fails once enough paths are thrown at it. The check now bounds the bias at 0.35 vol
-points, which is the quantity a desk would care about; the measured values are 0.13 to
-0.20 vp.
+The bias is real and documented from Session I. It is larger on the finer lift at 500 steps
+and indistinguishable at 1000, so these measurements support "the two lifts are within
+Monte Carlo error of each other at 1000 steps" and not the stronger claim that the finer
+lift is worse — even though more kernel mass in the first instants, where the QE draw is
+least accurate, is the direction one would expect.
+
+The threshold, though, was the wrong instrument regardless: **the standard error shrinks with
+the path count while a bias does not**, so any SE-based limit fails once enough paths are
+thrown at it. Single seeds bear that out at every step count tried — at 2000 steps and
+100,000 paths one still reads +4.3 SE. The check now bounds the bias at 0.35 vol points,
+which is the quantity a desk would care about; the measured values are 0.13 to 0.20 vp.
 
 ## Next
 
