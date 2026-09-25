@@ -209,7 +209,6 @@ class AdaptedParticleFilter(ParticleFilter):
         q95 = np.empty(T) if keep_path else None
         r = st.L_perp.shape[1]
         P = self.P
-        ar = np.arange(P)
         for t in range(T):
             for _ in range(self.substeps - 1):
                 z, u, zp = self._noise(rng)

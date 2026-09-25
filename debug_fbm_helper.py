@@ -14,7 +14,6 @@ diagnosis can be checked rather than believed.
     python debug_fbm_helper.py
 """
 
-import math
 
 import numpy as np
 

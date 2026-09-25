@@ -45,11 +45,14 @@ study_h_weighting.py                  which weights pin H: SE, corr(H, xi), bias
 study_cir_vs_rough.py                 CIR vs lifted rough filter: cost, forecasts, volatility drag, kappa sweep
 study_lewis_isometry.py               Ito isometry of the lift, cf drag identity, Lewis tail, lift vs Adams
 study_zero_boundary.py                Kalman vs cf filter vs particle filter at the zero boundary (+ _fine)
-study_finer_lift.py                   N = 24 / 32 / 40 lifts: prices vs Adams, kernel, cost, the H reported
+study_finer_lift.py                   N = 24 / 32 / 40 lifts: prices vs Adams, kernel, cost, the H reported (Session H)
 study_jump_modes.py                   driver vs direct rough jumps (Session H brief; direct mode kept only here)
 study_stability_constants.py          the Riccati stability edges, measured on a given lift
 study_fbm_methods.py                  fBm generators compared; Shevchenko's steps 1-10 checked
 study_hedging.py                      discrete hedging under rough Heston: BS delta, hedged MC, + variance swap
+study_lift_44.py                      N = 40 / 44 / 48: the kernel, prices, cost, and the lift against exact fGn
+study_egarch.py                       the T-EGARCH scan against rough Heston, with the true variance as the answer
+study_trial_bl_hurst.py               the Session L trial: Black-Litterman, FF4 and a dual Kalman filter on H
 benchmark_riccati.py                  einsum vs matmul vs pinned BLAS in the Riccati step, per n_u
 debug_fbm_helper.py                   the Session A fBm fixture bug, reproduced
 debug_fd_methods.py                   which 2nd-derivative stencil holds order on real grids
@@ -59,7 +62,8 @@ test_surface.py                       45 checks   (audit, SVI, density, replay)
 test_models.py                        25 checks   (Heston cf)
 test_pricing.py                       29 checks   (Fourier pricers)
 test_calibrate.py                     65 checks   (objective, LM, identifiability, prior)
-test_rough.py                         76 checks   (Session D + G + I: kernel, lift, cf, stability, positivity)
+test_rough.py                         81 checks   (Session D + G + I: kernel, lift, cf, stability, positivity;
+                                                   L: the carried state and the reused Riccati solve)
 test_rough_calibration.py             35 checks   (Session E: calibration, H, skew; G: weights)
 test_hawkes.py                        52 checks   (Session F1 + I: Hawkes on three hosts, jump size by impact)
 test_filters.py                       46 checks   (Session F2 + G: Kalman on three hosts, learning H)
@@ -67,13 +71,20 @@ test_recording.py                     37 checks   (Session G: IBKR recording off
 test_clock.py                         45 checks   (Session H: NYSE calendar, variance time, omega estimator)
 test_nongaussian.py                   20 checks   (Session H: particle and cf filters; slow tier)
 test_protocol.py                       9 checks   (Session I: RV cf filter, zero-boundary protocol)
-test_fbm.py                           19 checks   (Session I: exact fGn / fBm, Breuer-Major)
+test_fbm.py                           23 checks   (Session I: exact fGn / fBm, Breuer-Major; L: any covariance)
 test_hedging.py                       14 checks   (Sessions J-K: hedged Monte Carlo, variance swap)
+test_egarch.py                        17 checks   (Session L: EGARCH-t, Beta-t-EGARCH, GARCH)
+test_portfolio.py                     42 checks   (Session L trial: demo market, Black-Litterman, dual Kalman)
+models/egarch.py                      EGARCH(p,q)-t, Beta-t-EGARCH and GARCH: one interface, BIC scan, QLIKE
+portfolio/                            the Session L trial, self-contained (5 modules; delete to revert)
 conftest.py / pytest.ini              every suite runs under pytest; `-m "not slow"` is the quick tier
 .github/workflows/ci.yml              quick tier on push; full tier + health trend weekly / on demand
 docs/tutorial-ibkr-recording.md       how to install, log in and record (the part that needs Akin)
 docs/comparison-*.pdf                 Session H decision briefs (finer lift, particle vs cf, jump modes); fBm methods
 docs/session-i-report.pdf             Session I: the decisions implemented, the last checks, v1.0.0
+docs/study-lift-44.md                 Session L: 44 nodes, what they buy, and how they were paid for
+docs/study-egarch.md                  Session L: the T-EGARCH scan; BIC ranks the t models first, they forecast worst
+docs/trial-bl-hurst.md                Session L: the dual-Kalman-on-H trial, and why it does not work as stated
 docs/overview-2026-09-15.pdf          Sessions A-H overview and recommendations
 docs/superpowers/plans/               the six-session rough Heston plan
 captures/                             frames, GIFs, comparisons, snapshot.json
@@ -91,15 +102,17 @@ captures/                             frames, GIFs, comparisons, snapshot.json
 .venv/Scripts/python.exe test_rough_calibration.py  # 35 passed, ~4 min
 .venv/Scripts/python.exe capture_rough_vs_heston.py # Phase 2 headline, ~6 min
 .venv/Scripts/python.exe test_hawkes.py    # 52 passed, ~20 s
+.venv/Scripts/python.exe test_egarch.py    # 17 passed, ~25 s
+.venv/Scripts/python.exe test_portfolio.py # 42 passed, ~5 s
 .venv/Scripts/python.exe test_filters.py   # 46 passed, ~10 min
 .venv/Scripts/python.exe capture_session_f.py # Session F figure
 .venv/Scripts/python.exe -m pytest -m "not slow"  # quick tier, ~3 min
 .venv/Scripts/python.exe test_recording.py # 37 passed, ~30 s
-.venv/Scripts/python.exe -m pytest                # everything: 105 items, 658 checks (CI: 12 min)
+.venv/Scripts/python.exe -m pytest                # everything: 118 items, 743 checks (CI: 12 min)
 .venv/Scripts/python.exe record_chains.py --check # IBKR smoke test (needs IB Gateway)
 .venv/Scripts/python.exe run_real_data.py --synthetic   # pipeline on a known answer
 .venv/Scripts/python.exe volatility_surface_3.py --demo # the live dashboard on a fake market, no TWS
-.venv/Scripts/python.exe healthcheck.py --trend         # 124 analytical checks + trends
+.venv/Scripts/python.exe healthcheck.py --trend         # 128 analytical checks + trends
 .venv/Scripts/python.exe capture_heston.py      # Heston's own skew term structure
 .venv/Scripts/python.exe capture_calibration.py # Phase 1 baseline vs a rough surface
 .venv/Scripts/python.exe capture_v3.py    # re-render + end-to-end validation
@@ -725,6 +738,45 @@ a variance swap beside it.
   from 0.97 (control) to 0.75 at H = 0.05. A rough-vanna term at dt^(2H) fits worse than
   one free exponent, so the effective exponent is a description, not an explanation.
 - Three of these run as standing health checks.
+
+## Session L (2026-09-25) -- forty-four nodes, a volatility backup, and a trial
+
+**The lift is 44 nodes** (`docs/study-lift-44.md`). The worst kernel error over the H box
+falls from 0.908% to 0.763%, so the 1% criterion keeps a quarter of its headroom rather than
+a tenth, and implied vols come 16% closer to true rough Heston everywhere measured.
+
+- **The four nodes are paid for, twice over.** Two exact changes to the Riccati solver --
+  dropping the factors with no memory beyond one step (20 of 44 at one year), and reusing a
+  solve when only v0 or theta changed (they enter the log cf linearly) -- make the 44-node
+  objective *faster* than the 40-node one was: 0.425 s against 0.470 s. Verified against 72
+  saved reference arrays to 1.2e-14.
+- **What the nodes do not buy.** Graded against exact fGn -- the lifted driver's stationary
+  increments have a closed-form spectrum, as does fGn -- four nodes change the increment law
+  in the third decimal. The variogram at one day is 6.1% off at H = 0.12 against 6.3%, and
+  the local exponent reads 0.253 where the exact one is 0.241. **The fastest node is the
+  lever, not the node count**: moving it from 1e8 to 1e12/y cuts the variogram error at one
+  minute from 30% to 4% while the kernel error does not move at all. Telling the two lifts
+  apart would take 54 years of five-minute data, or 13,000 years of daily.
+- **A T-EGARCH scan, kept as the returns-only backup** (`models/egarch.py`,
+  `docs/study-egarch.md`): EGARCH(p,q)-t, Harvey's score-driven Beta-t-EGARCH, and GARCH.
+  Scanned against this project's own rough Heston, where the true daily integrated variance
+  is the answer: **BIC ranks the t models first and they forecast worst.** Every t fit lands
+  at nu ~ 2.2 -- matching the tail shape, and through nu/(nu-2) setting the variance forecast
+  six times too high. Pick by out-of-sample QLIKE, never by in-sample BIC. The best
+  returns-only model carries 1.20x HAR-RV's QLIKE, which is what intraday data is worth here.
+- **The trial** (`portfolio/`, `docs/trial-bl-hurst.md`): a Black-Litterman portfolio on a
+  synthetic market with a database, FF4 attribution and deflation through **falsify**, and a
+  dual Kalman filter calibrating the risk model's Hurst index, the views' confidence and the
+  risk aversion toward a target market exposure. **Practical as machinery, not as stated.**
+  The objective is monotone in H, so the grid and the filter both drive it to the bound and
+  the cost-optimal H (0.02) is not the market's (0.10) -- calibrating H against cost produces
+  a cost setting, not an estimate of roughness. The target was unreachable too: the
+  portfolio's exposure swings with sd 0.24 *by design*, since Black-Litterman is
+  volatility-managed, against a 0.05 tolerance. Deleting `portfolio/` reverts it.
+- **Two checks were passing for the wrong reason.** A bias judged in standard errors fails
+  once enough paths are thrown at it (the QE skew bias is now bounded in vol points), and the
+  synthetic history's H is three times noisier than the profile curvature reports (0.135 +/-
+  0.079 over 21 seeds against a median reported SE of 0.028).
 
 ## Still open
 

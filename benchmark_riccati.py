@@ -20,7 +20,6 @@ captures/riccati_benchmark.png and captures/riccati_benchmark.json.
 """
 
 import json
-import math
 import pathlib
 import platform
 import time

@@ -49,7 +49,6 @@ profile read 0.183 with it and 0.130 without, planted 0.10), so the parameters h
 come from the prior-mean model. See docs/session-i-report.md.
 """
 
-import math
 import time
 
 import numpy as np

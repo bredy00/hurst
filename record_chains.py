@@ -19,7 +19,6 @@ import argparse
 import collections
 import datetime
 import json
-import math
 import pathlib
 import sys
 import time
