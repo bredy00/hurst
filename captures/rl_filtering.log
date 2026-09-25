@@ -1,0 +1,17 @@
+F  logging each filter over every series (the expensive part; cached afterwards)
+  (cached: rl_filter_logs.json)
+   the filtering state, 4482 transitions with a predecessor:
+     next boundary z: F    24.00, p 6.6e-24 (effective n 4764 of 4482, residual rho1 -0.03: p 6.3e-24), the lags explain 2.61% -- LAGS MATTER
+     next RV surprise: F     9.86, p 2.2e-09 (effective n 4492 of 4482, residual rho1 -0.00: p 2.2e-09), the lags explain 1.09% -- LAGS MATTER
+     reward: F     0.33, p 9.0e-01 (effective n 1327 of 4482, residual rho1 +0.54: p 9.0e-01), the lags explain 0.04% -- Markov
+   the next state is identical across actions to 0.0e+00: a bandit, as the hedge was
+   6 series x 250 days; reward = day's log-likelihood - 1.0 x seconds. The reference is the 64-substep particle filter.
+   policy                       loglik   seconds   objective  nats/day vs reference  filter shares
+   always cf                    5401.8      24.3      5377.5                 +1.790  cf 100%
+   the Session I protocol       5396.8      22.8      5374.0                 +1.787  kalm 50% cf 50%
+   learned, bootstrapped        5360.0      27.6      5332.3                 +1.762  kalm 5% cf 69% part 26%
+   learned, myopic              5360.0      27.6      5332.3                 +1.762  kalm 5% cf 69% part 26%
+   always kalman                3706.6       0.6      3706.0                 +0.660  kalm 100%
+   always particle (16)       -31732.4      23.8    -31756.2                -22.966  part 100%
+
+[done in 1s] -> C:\Projects\volatility-surface-tuning\captures\rl.json

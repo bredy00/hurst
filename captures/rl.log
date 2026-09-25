@@ -1,0 +1,43 @@
+   building the hedging batch (32000 training paths)...
+A  exact value iteration: V [-3.0, -3.0, -2.0, -1.0, 0.0], policy ['jump', 'walk', 'walk', 'walk'] (4 iterations, residual 0.0e+00)
+A  fitted-q  : worst |Q - Q*| on the live states 5.63e-13; recovers the exact policy: True
+A  lspi      : worst |Q - Q*| on the live states 9.33e-13; recovers the exact policy: True
+A  tabular-q : worst |Q - Q*| on the live states 3.77e-14; recovers the exact policy: True
+M  hedging state (S, sigma_hat, tau), 960000 transitions with a predecessor:
+     next delta: F    33.98, p 7.8e-35 (effective n 960349 of 960000, residual rho1 -0.00: p 7.8e-35), the lags explain 0.02% -- significant but small
+     next moneyness: F  1262.29, p 0.0e+00 (effective n 965257 of 960000, residual rho1 -0.00: p 0.0e+00), the lags explain 0.65% -- significant but small
+     reward: F   407.24, p 0.0e+00 (effective n 859198 of 960000, residual rho1 +0.06: p 0.0e+00), the lags explain 0.21% -- significant but small
+   verdict: Markov enough to bootstrap through
+H  one-month ATM call, rebalanced every 4 steps of 128; 32000 training and 16000 test paths, 21 hedge ratios
+   rule                                residual sd / price  fit seconds
+   Hedged Monte Carlo                               0.3050          0.6
+   fitted-Q, myopic (gamma = 0)                     0.3543          0.4
+   fitted-Q, bootstrapped                           0.3568          8.6
+   LSPI                                             0.3573         14.8
+   Black-Scholes delta                              0.3582          0.0
+   ...snapped to the grid                           0.3596          0.0
+   at step 40 (tau 0.057 y), the hedge each rule chooses across the smile:
+     BS delta   0.224   0.412   0.549   0.670   0.802
+     HMC        0.133   0.329   0.475   0.595   0.715
+     fitted-Q   0.150   0.300   0.400   0.500   0.650
+   mean |RL - HMC| 0.0620, mean |RL - BS| 0.1237 (the grid's own step is 0.050)
+H2 how the agent's residual moves with the batch and with the action grid:
+        2000 paths (  3047 rows per action): 0.3533
+        8000 paths ( 12190 rows per action): 0.3561
+       32000 paths ( 48761 rows per action): 0.3543
+      128000 paths (195047 rows per action): 0.3569
+       3 hedge ratios: agent 0.4663, BS on the same grid 0.4955, difference -0.0292
+       6 hedge ratios: agent 0.3816, BS on the same grid 0.3902, difference -0.0086
+      11 hedge ratios: agent 0.3612, BS on the same grid 0.3661, difference -0.0050
+      21 hedge ratios: agent 0.3543, BS on the same grid 0.3596, difference -0.0054
+      41 hedge ratios: agent 0.3550, BS on the same grid 0.3581, difference -0.0032
+C  cost of the same hedging answer, on 32 000 paths:
+     simulating the paths             7.0 s  (both pay this)
+     Hedged Monte Carlo               0.6 s  -> the analytic optimum
+     building the RL batch            0.5 s
+     fitted-q myopic                  0.4 s
+     fitted-q bootstrapped            8.7 s
+     lspi                            10.4 s
+   the cheapest agent costs 1.6x Hedged Monte Carlo and does not reach it.
+
+[done in 129s] -> C:\Projects\volatility-surface-tuning\captures\rl.json

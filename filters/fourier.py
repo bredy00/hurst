@@ -249,6 +249,7 @@ class FourierFilter:
         k_g, s_g = mV * mV / varV, varV / mV
         T = len(y)
         ll, capped_days, fallback_days = 0.0, 0, 0
+        ll_t = np.zeros(T)
         path = np.empty((T, 4)) if keep_path else None
         for t in range(T):
             # --- the prior's exact affine moments of (U_{t+1}, V_{t+1}, x)
@@ -308,12 +309,14 @@ class FourierFilter:
                 Cvx = R_eff * (q1 - EV * p1) / py
                 ok = EV > 0 and VV > 0 and Vxy > 0 and all(map(math.isfinite, (EV, VV, Exy, Vxy, Cvx)))
             if ok:
-                ll += math.log(py)
+                ll_t[t] = math.log(py)
+                ll += ll_t[t]
             else:                                                 # Gaussian (Kalman) update for this day
                 fallback_days += 1
                 S = var_x + R_eff
                 nu = y[t] - Ex
-                ll += -0.5 * (math.log(2.0 * math.pi * S) + nu * nu / S)
+                ll_t[t] = -0.5 * (math.log(2.0 * math.pi * S) + nu * nu / S)
+                ll += ll_t[t]
                 gZ = SZ[:, 1] / S
                 EV = max(mV_pred + gZ[0] * nu, 1e-10)
                 Exy = Ex + gZ[1] * nu
@@ -328,8 +331,8 @@ class FourierFilter:
             k_g, s_g = EV * EV / VV, VV / EV
             if keep_path:
                 path[t] = (EV, math.sqrt(VV), Ex, Exy)
-        out = {"loglik": ll, "capped_days": capped_days, "fallback_days": fallback_days,
-               "panels": len(pan.edge) - 1}
+        out = {"loglik": ll, "loglik_t": ll_t, "capped_days": capped_days,
+               "fallback_days": fallback_days, "panels": len(pan.edge) - 1}
         if keep_path:
             out["mean_V"], out["sd_V"] = path[:, 0], path[:, 1]
             out["prior_mean_rv"], out["post_mean_rv"] = path[:, 2], path[:, 3]

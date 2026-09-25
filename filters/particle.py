@@ -118,6 +118,7 @@ class ParticleFilter:
         R = float(p["R"])
         ll = 0.0
         T = len(y)
+        ll_t = np.zeros(T)
         ess = np.empty(T)
         mean_V = np.empty(T) if keep_path else None
         q05 = np.empty(T) if keep_path else None
@@ -143,7 +144,8 @@ class ParticleFilter:
             logw = -0.5 * ((y[t] - pred) ** 2 / var + np.log(var) + log2pi)
             top = logw.max()
             wt = np.exp(logw - top)
-            ll += top + math.log(wt.mean())
+            ll_t[t] = top + math.log(wt.mean())
+            ll += ll_t[t]
             wn = wt / wt.sum()
             ess[t] = 1.0 / float(np.sum(wn * wn))
             if keep_path:
@@ -154,7 +156,7 @@ class ParticleFilter:
                 q95[t] = float(pred[order][min(np.searchsorted(cw, 0.95), self.P - 1)])
             idx = sorted_systematic(pred, logw, rng.random())
             Y = Y[:, idx]
-        out = {"loglik": ll, "ess": ess}
+        out = {"loglik": ll, "loglik_t": ll_t, "ess": ess}
         if keep_path:
             out.update(mean_V=mean_V, q05=q05, q95=q95)
         return out

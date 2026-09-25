@@ -1,0 +1,303 @@
+{
+ "A": {
+  "V_exact": [
+   -3.0,
+   -3.0,
+   -2.0,
+   -1.0,
+   0.0
+  ],
+  "pi_exact": [
+   1,
+   0,
+   0,
+   0,
+   0
+  ],
+  "agents": {
+   "fitted-q": {
+    "max_Q_error": 5.626610288800293e-13,
+    "policy_matches": true
+   },
+   "lspi": {
+    "max_Q_error": 9.334755191048316e-13,
+    "policy_matches": true
+   },
+   "tabular-q": {
+    "max_Q_error": 3.774758283725532e-14,
+    "policy_matches": true
+   }
+  }
+ },
+ "M": {
+  "hedging": {
+   "next delta": {
+    "F": 33.97569315706715,
+    "p": 7.801583215832474e-35,
+    "p_effective": 7.801562640645771e-35,
+    "partial_r2": 0.0001769274539821789,
+    "n": 960000,
+    "n_effective": 960349.2395784849,
+    "residual_rho1": -0.0001818625337969399,
+    "markov": false
+   },
+   "next moneyness": {
+    "F": 1262.2921492934945,
+    "p": 0.0,
+    "p_effective": 0.0,
+    "partial_r2": 0.006531571703476026,
+    "n": 960000,
+    "n_effective": 965256.62005725,
+    "residual_rho1": -0.0027303477377959113,
+    "markov": false
+   },
+   "reward": {
+    "F": 407.2375664906814,
+    "p": 0.0,
+    "p_effective": 0.0,
+    "partial_r2": 0.0021165639509305965,
+    "n": 960000,
+    "n_effective": 859198.130044199,
+    "residual_rho1": 0.05541005583231991,
+    "markov": false
+   }
+  },
+  "hedging_ok": true
+ },
+ "H": {
+  "price": 0.021585766016466335,
+  "n_train": 32000,
+  "n_test": 16000,
+  "n_actions": 21,
+  "every": 4,
+  "rules": {
+   "Black-Scholes delta": {
+    "sd": 0.35821340927176093,
+    "seconds": 0.0
+   },
+   "...snapped to the grid": {
+    "sd": 0.35964918982924204,
+    "seconds": 0.0
+   },
+   "Hedged Monte Carlo": {
+    "sd": 0.30496629030518735,
+    "seconds": 0.6047542000887915
+   },
+   "fitted-Q, myopic (gamma = 0)": {
+    "sd": 0.3542820378197662,
+    "seconds": 0.4302790999645367,
+    "info": {
+     "sweeps": 1.0,
+     "last_change": 0.00016550628634259397,
+     "converged": 0.0
+    }
+   },
+   "fitted-Q, bootstrapped": {
+    "sd": 0.35679292298144644,
+    "seconds": 8.638185099931434,
+    "info": {
+     "sweeps": 30.0,
+     "last_change": 1.6014499283512462e-07,
+     "converged": 0.0
+    }
+   },
+   "LSPI": {
+    "sd": 0.3573146857525173,
+    "seconds": 14.849082799977623,
+    "info": {
+     "iterations": 5.0,
+     "last_change": 2.6962075150641085e-15,
+     "condition": 22135.893529848083,
+     "converged": 1.0
+    }
+   }
+  },
+  "policy_slice": {
+   "step": 40,
+   "tau": 0.057291666666666664,
+   "bs_delta": [
+    0.22415687966158698,
+    0.4120829087150293,
+    0.5487179463473087,
+    0.6695411455314736,
+    0.8023005341293344
+   ],
+   "hmc": [
+    0.13306638944513188,
+    0.3285724978346314,
+    0.4746043322325745,
+    0.5949818708112051,
+    0.7147064197686631
+   ],
+   "rl": [
+    0.15000000000000002,
+    0.30000000000000004,
+    0.4,
+    0.5,
+    0.65
+   ]
+  },
+  "hmc_vs_rl_mean_abs": 0.06198636679772714,
+  "bs_vs_rl_mean_abs": 0.12373857722891339
+ },
+ "H2": {
+  "paths": [
+   {
+    "n_paths": 2000,
+    "rows_per_action": 3047,
+    "sd": 0.3532858938689402
+   },
+   {
+    "n_paths": 8000,
+    "rows_per_action": 12190,
+    "sd": 0.3561478557159059
+   },
+   {
+    "n_paths": 32000,
+    "rows_per_action": 48761,
+    "sd": 0.3542820378197662
+   },
+   {
+    "n_paths": 128000,
+    "rows_per_action": 195047,
+    "sd": 0.3568889978012711
+   }
+  ],
+  "actions": [
+   {
+    "n_actions": 3,
+    "sd": 0.4663068554251377,
+    "grid_floor": 0.495534017028773
+   },
+   {
+    "n_actions": 6,
+    "sd": 0.38159237538521673,
+    "grid_floor": 0.3902258189689052
+   },
+   {
+    "n_actions": 11,
+    "sd": 0.3611530987780881,
+    "grid_floor": 0.3661487830339857
+   },
+   {
+    "n_actions": 21,
+    "sd": 0.3542820378197662,
+    "grid_floor": 0.35964918982924204
+   },
+   {
+    "n_actions": 41,
+    "sd": 0.3549604460150103,
+    "grid_floor": 0.3581188210043308
+   }
+  ]
+ },
+ "C": {
+  "simulate_32k_paths_s": 6.964623900013976,
+  "hmc_fit_s": 0.5984396999701858,
+  "build_batch_s": 0.5396351999370381,
+  "fitted-q myopic_fit_s": 0.4311809999635443,
+  "fitted-q bootstrapped_fit_s": 8.675854600034654,
+  "lspi_fit_s": 10.394420800032094,
+  "rl_over_hmc": 1.6222456497270292
+ },
+ "F": {
+  "rows": {
+   "always kalman": {
+    "loglik": 3706.6227909645695,
+    "seconds": 0.5981279998086393,
+    "objective": 3706.024662964761,
+    "days": 1500,
+    "share": {
+     "kalman": 1.0,
+     "cf": 0.0,
+     "particle": 0.0
+    },
+    "gap_to_truth": 990.170018699248,
+    "gap_per_day": 0.6601133457994987
+   },
+   "always cf": {
+    "loglik": 5401.822333960375,
+    "seconds": 24.311269400059246,
+    "objective": 5377.511064560315,
+    "days": 1500,
+    "share": {
+     "kalman": 0.0,
+     "cf": 1.0,
+     "particle": 0.0
+    },
+    "gap_to_truth": 2685.369561695053,
+    "gap_per_day": 1.7902463744633688
+   },
+   "always particle (16)": {
+    "loglik": -31732.416640238684,
+    "seconds": 23.793124199961312,
+    "objective": -31756.209764438645,
+    "days": 1500,
+    "share": {
+     "kalman": 0.0,
+     "cf": 0.0,
+     "particle": 1.0
+    },
+    "gap_to_truth": -34448.869412504006,
+    "gap_per_day": -22.965912941669337
+   },
+   "the Session I protocol": {
+    "loglik": 5396.796707057368,
+    "seconds": 22.783250999986194,
+    "objective": 5374.0134560573815,
+    "days": 1500,
+    "share": {
+     "kalman": 0.5,
+     "cf": 0.5,
+     "particle": 0.0
+    },
+    "gap_to_truth": 2680.343934792046,
+    "gap_per_day": 1.7868959565280307
+   },
+   "learned, bootstrapped": {
+    "loglik": 5359.975045982921,
+    "seconds": 27.64013421555702,
+    "objective": 5332.334911767364,
+    "days": 1500,
+    "share": {
+     "kalman": 0.046,
+     "cf": 0.6926666666666667,
+     "particle": 0.2613333333333333
+    },
+    "gap_to_truth": 2643.5222737175995,
+    "gap_per_day": 1.7623481824783997
+   },
+   "learned, myopic": {
+    "loglik": 5359.975045982921,
+    "seconds": 27.64013421555702,
+    "objective": 5332.334911767364,
+    "days": 1500,
+    "share": {
+     "kalman": 0.046,
+     "cf": 0.6926666666666667,
+     "particle": 0.2613333333333333
+    },
+    "gap_to_truth": 2643.5222737175995,
+    "gap_per_day": 1.7623481824783997
+   }
+  },
+  "markov": [
+   "next boundary z: F    24.00, p 6.6e-24 (effective n 4764 of 4482, residual rho1 -0.03: p 6.3e-24), the lags explain 2.61% -- LAGS MATTER",
+   "next RV surprise: F     9.86, p 2.2e-09 (effective n 4492 of 4482, residual rho1 -0.00: p 2.2e-09), the lags explain 1.09% -- LAGS MATTER",
+   "reward: F     0.33, p 9.0e-01 (effective n 1327 of 4482, residual rho1 +0.54: p 9.0e-01), the lags explain 0.04% -- Markov"
+  ],
+  "markov_ok": false,
+  "next_state_spread": 0.0,
+  "hosts": [
+   "at the boundary (theta 0.02, xi 0.9)",
+   "away from it (theta 0.09, xi 0.12)"
+  ],
+  "n_days": 250,
+  "seeds": [
+   1,
+   2,
+   3
+  ],
+  "cost_weight": 1.0
+ }
+}

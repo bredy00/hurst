@@ -704,6 +704,7 @@ def kalman_filter(model, p, y, policy=None, x0=None, P0=None):
     S_arr = np.empty(n)
     gain = np.empty((n, d))
     ll = 0.0
+    ll_t = np.empty(n)
     for k in range(n):
         if k > 0:
             Q = model.process_cov(p, x)
@@ -722,14 +723,15 @@ def kalman_filter(model, p, y, policy=None, x0=None, P0=None):
         x = x + K * nu
         IKH = I - np.outer(K, H)
         P = IKH @ P_adj @ IKH.T + R_eff * np.outer(K, K)
-        ll += -0.5 * (math.log(2.0 * math.pi * S) + nu * nu / S)
+        ll_t[k] = -0.5 * (math.log(2.0 * math.pi * S) + nu * nu / S)
+        ll += ll_t[k]
         out_post[k] = x
         out_P[k] = P
         innov[k] = nu
         S_arr[k] = S
         gain[k] = K
     return {"x_prior": out_prior, "x_post": out_post, "P_post": out_P, "P_prior": out_Pp, "innov": innov,
-            "S": S_arr, "gain": gain, "loglik": ll,
+            "S": S_arr, "gain": gain, "loglik": ll, "loglik_t": ll_t,
             "estimate": model.measure(out_post)}
 
 
@@ -755,6 +757,7 @@ def _scalar_filter(model, p, y):
     S_arr = np.empty(n)
     gain = np.empty(n)
     ll = 0.0
+    ll_t = np.empty(n)
     log2pi = math.log(2.0 * math.pi)
     if state_q:
         k_, th, xi = p["kappa"], p["theta"], p["xi"]
@@ -773,14 +776,16 @@ def _scalar_filter(model, p, y):
         K = P * h / S
         x += K * nu
         P = (1.0 - K * h) ** 2 * P + R * K * K
-        ll -= 0.5 * (log2pi + math.log(S) + nu * nu / S)
+        ll_t[k] = -0.5 * (log2pi + math.log(S) + nu * nu / S)
+        ll += ll_t[k]
         post[k] = x
         Ps[k] = P
         innov[k] = nu
         S_arr[k] = S
         gain[k] = K
     return {"x_prior": prior[:, None], "x_post": post[:, None], "P_post": Ps[:, None, None],
-            "innov": innov, "S": S_arr, "gain": gain[:, None], "loglik": ll, "estimate": post}
+            "innov": innov, "S": S_arr, "gain": gain[:, None], "loglik": ll, "loglik_t": ll_t,
+            "estimate": post}
 
 
 def steady_state_ou(p, dt):
