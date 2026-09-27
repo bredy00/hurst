@@ -1,10 +1,53 @@
 # Changelog
 
-## Unreleased: Session M, a reinforcement-learning framework and one way in
+## Unreleased: Sessions M and N -- a reinforcement-learning framework, honest error bars, two guards
+
+### Session N (2026-09-27)
+
+Full accounts: README "Session N", `docs/rl-framework.md` §3, `study_h_error_bars.py`.
+
+#### Added
+- **`filters.kalman.robust_profile_se`: the sandwich SE for the profile maximiser.** Per-day
+  scores from a three-point quadratic in each day's `loglik_t`, information from their
+  curvature, and a Newey-West long-run variance (lag floor(4 (T/100)^(2/9)), falsify's
+  rule). `profile_h` returns `se_robust` beside the curvature's `se_quadratic`. Graded by
+  `study_h_error_bars.py` over 21 histories with H = 0.10 planted: the curvature SE is 0.37x
+  the real spread (95% coverage 47%), the robust SE 0.85x (coverage 89%); pre-registered
+  test PASS. The estimate's +0.046 bias is unchanged -- this fixes the width only.
+- **`quadratic-q`**, an agent that fits Q(s, a) as an explicit quadratic in the action and
+  acts at the vertex; **`rl.hedging_env.known_reward_fit`**, `score_rule`, `hmc_mark`, and a
+  `mark=` argument to `build_batch`; **`study_rl.py D`**, which attributes the whole gap to
+  Hedged Monte Carlo and reproduces HMC to 0.0002.
+- **`models/har.py`**: HAR-RV at any horizon, the log-HAR with its lognormal correction,
+  Newey-West errors with a lag that covers overlapping targets, QLIKE.
+- **`python volsurf.py guard`**: refuses when a public repository would publish the licensed
+  recordings under `captures/real/`; a CI step and a standing health check run it too.
+- `test_har.py` (13 checks), `test_volsurf.py` (4), five robust-SE checks in
+  `test_protocol.py`, six in `test_rl.py`; five standing health checks.
+
+#### Changed
+- `run_real_data.py` reports the robust SE on H, with the curvature's beside it and how
+  much too optimistic the curvature is.
+- `study_egarch.py` fits HAR through `models/har.py` (identical to its old inline version
+  to 1.6e-17).
+- CI checks out falsify beside the project, pinned by SHA, so the falsify agreement checks
+  run there too; `pytest.ini` keeps pytest out of that checkout.
+
+#### Corrected
+- **The Session M hedging diagnosis.** The gap was put down to the argmax comparing noisy
+  neighbours instead of locating the parabola's vertex. The vertex agent scores 0.3541
+  against the argmax's 0.3543, so that was wrong. Learning a known reward as a black box
+  carries 53.7% of the gap and the Black-Scholes mark, which is not a martingale under the
+  rough model, 37.4%; pooling dates 4.8%, the basis 3.9%. In the other order the effects
+  add up to within 6.9%.
+- **The CI/local count difference** (630 against 631) was first reported as a platform
+  difference. It was falsify being absent on CI.
+
+### Session M (2026-09-26)
 
 Full accounts: `docs/rl-framework.md`, `rl/README.md`, `docs/customising.md`.
 
-### Added
+#### Added
 - **`rl/` -- reinforcement learning, OFF BY DEFAULT** (`rl.enable()`, or VOLSURF_RL=1, or
   `python volsurf.py rl`). Every entry point refuses until it is on, and the refusal names
   the switch. The three primitives asked for, and nothing else:
@@ -24,9 +67,8 @@ Full accounts: `docs/rl-framework.md`, `rl/README.md`, `docs/customising.md`.
   same problem analytically. The agent learns the leverage adjustment -- it holds less than
   the Black-Scholes delta, as HMC does, and gets about half the distance -- and still leaves
   **0.354 of the price against HMC's 0.305**. Neither more data (2k to 128k paths: flat) nor
-  a finer grid (3 to 41 actions: flat above 11) closes it. **The reward is quadratic in the
-  action, and HMC solves for the parabola's vertex while the argmax compares noisy
-  neighbours**; when you know the reward's structure, estimate it.
+  a finer grid (3 to 41 actions: flat above 11) closes it. *(The reason first given here,
+  the argmax, was wrong: see Session N, Corrected.)*
 - **The hedging MDP is a bandit**, which the framework detects: the writer's hedge does not
   move the market, so the next state does not depend on the action and argmax_a Q =
   argmax_a R. The myopic agent is better AND twenty times cheaper than the bootstrapped one
@@ -44,7 +86,7 @@ Full accounts: `docs/rl-framework.md`, `rl/README.md`, `docs/customising.md`.
 - Four standing health checks for the framework (132 in total), including that it is still
   off by default and that the Markov test still rejects a state hiding a lag.
 
-### Changed
+#### Changed
 - **All three filters report a per-day log-likelihood** (`loglik_t`, summing to `loglik` by
   construction). Needed by the offline filtering MDP, and a diagnostic in its own right: a
   total hides WHERE a filter loses, and the zero-boundary work is exactly a question about

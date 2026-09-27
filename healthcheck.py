@@ -1133,6 +1133,70 @@ def h_rl():
         (rl.enable if was else rl.disable)()
 
 
+def h_session_n():
+    """
+    Session N. Each check guards something whose failure would be silent: an error bar that
+    stops widening when the model is wrong, a HAR fit that stops recovering what was planted,
+    a vertex agent that stops finding a vertex, and a licensed recording tracked by a public
+    repository -- the one mistake here that cannot be undone.
+    """
+    import filters.kalman as kf
+    import models.har as har
+    import rl
+    import rl.agents as ag
+    import volsurf
+    G = "Session N: error bars, HAR, the vertex, the guard"
+
+    # the sandwich SE on a Gaussian location model, where its answer is exact: the model's
+    # curvature is T whatever the data, so the ratio robust / curvature is the data's sd
+    rng = np.random.default_rng(7)
+    grid = np.array([-0.1, 0.0, 0.1])
+    ratios = []
+    for sd in (1.0, 2.0):
+        x = sd * rng.standard_normal(20000)
+        runs = [{"loglik_t": -0.5 * (x - h) ** 2} for h in grid]
+        ratios.append(kf.robust_profile_se(grid, runs, 1, float(x.mean()), lag=0)["ratio"])
+    record(G, "robust SE = curvature SE when the model is right", abs(ratios[0] - 1), 0.05,
+           abs(ratios[0] - 1) < 0.05, note=f"ratio {ratios[0]:.3f}; unit-variance data, unit-variance model")
+    record(G, "robust SE = 2x curvature SE when the data's sd is 2", abs(ratios[1] / 2 - 1), 0.05,
+           abs(ratios[1] / 2 - 1) < 0.05, note=f"ratio {ratios[1]:.3f}; the curvature SE cannot see this")
+
+    b = (1e-5, 0.4, 0.3, 0.2)
+    rv = np.full(6000, b[0] / (1 - sum(b[1:])))
+    for t in range(22, len(rv)):
+        rv[t] = max(b[0] + b[1] * rv[t - 1] + b[2] * rv[t - 5:t].mean() + b[3] * rv[t - 22:t].mean()
+                    + 2e-5 * rng.standard_normal(), 1e-8)
+    m = har.fit(rv)
+    z = float(np.max(np.abs((m.coef - np.array(b)) / m.se)))
+    record(G, "HAR recovers planted coefficients (worst |z|)", z, 3.0, z < 3.0,
+           note="models/har.py: 1/5/22-day trailing means, Newey-West errors")
+
+    was = rl.is_enabled()
+    rl.enable()
+    try:
+        vals = np.linspace(0.0, 1.0, 11)
+        n = 20000
+        xs = rng.uniform(-1, 1, n)
+        phi = np.column_stack([np.ones(n), xs])
+        a_idx = rng.integers(0, len(vals), n)
+        vtx = 0.5 + 0.3 * xs
+        r = -(vals[a_idx] - vtx) ** 2 + 0.01 * rng.standard_normal(n)
+        qq = ag.QuadraticQ(vals).fit(ag.Batch(phi, a_idx, r, phi, np.ones(n, bool), len(vals)))
+        err = float(np.max(np.abs(qq.vertex(phi) - vtx)))
+        record(G, "quadratic-Q finds a vertex between grid points", err, 0.02, err < 0.02,
+               note="grid step 0.10; worst |a* - planted vertex|")
+    finally:
+        (rl.enable if was else rl.disable)()
+
+    tracked = subprocess.run(["git", "ls-files"], cwd=str(ROOT), capture_output=True,
+                             text=True).stdout.split()
+    hits = volsurf.licensed_paths(tracked)
+    vis = volsurf.repo_visibility() if hits else None       # no network unless it matters
+    record(G, "licensed recordings a public repository would publish", float(len(hits)), 0.0,
+           not hits or vis == "private", trend=False,
+           note="captures/real/ is trackable by design: safe only while the repository is private")
+
+
 def h_engineering():
     out = subprocess.run(
         [sys.executable, "-c",
@@ -1212,7 +1276,8 @@ CHECKS = [h_timing, h_normal, h_black_scholes, h_finite_difference, h_char_func,
           h_hurst, h_forward, h_svi, h_arbitrage, h_calibration,
           h_fractional_kernel, h_lift, h_rough_robustness, h_identifiability_rough,
           h_hawkes, h_kalman, h_recording, h_positivity, h_lift_fidelity, h_weighting, h_learn_h,
-          h_zero_boundary, h_clock, h_hedging, h_lift_44, h_rl, h_engineering, h_replay]
+          h_zero_boundary, h_clock, h_hedging, h_lift_44, h_rl, h_session_n, h_engineering,
+          h_replay]
 
 
 def main():

@@ -23,13 +23,30 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+      # falsify (a public sibling repository), pinned: without it test_portfolio replaces the
+      # two checks proving its regression agrees with portfolio/factor_fit by one fallback
+      # check, and the agreement was only ever verified on the development machine (Session N)
+      - uses: actions/checkout@v5
+        with:
+          repository: bredy00/falsify
+          ref: 6143820fb9a3e7c44c3fd87c5d44cad68c6cf527
+          path: falsify-src
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
       - name: install
         run: pip install -r requirements.txt
+      # falsify-src is checked out inside the workspace; pytest.ini keeps pytest out of it
+      - name: licensed-data guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VIS: ${{ github.event.repository.visibility }}
+        # a scheduled run's event carries no repository, so ask the API when VIS is empty
+        run: python volsurf.py guard --ci "${VIS:-$(gh api repos/${{ github.repository }} --jq .visibility)}"
       - name: pytest -m "not slow"
+        env:
+          FALSIFY_PATH: ${{ github.workspace }}/falsify-src
         run: pytest -m "not slow" -q
 
   full:
@@ -39,6 +56,14 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v5
+      # falsify (a public sibling repository), pinned: without it test_portfolio replaces the
+      # two checks proving its regression agrees with portfolio/factor_fit by one fallback
+      # check, and the agreement was only ever verified on the development machine (Session N)
+      - uses: actions/checkout@v5
+        with:
+          repository: bredy00/falsify
+          ref: 6143820fb9a3e7c44c3fd87c5d44cad68c6cf527
+          path: falsify-src
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -52,6 +77,8 @@ jobs:
           key: health-history-${{ github.run_id }}
           restore-keys: health-history-
       - name: pytest (everything)
+        env:
+          FALSIFY_PATH: ${{ github.workspace }}/falsify-src
         run: pytest -q
       - name: health checks with trend
         run: |

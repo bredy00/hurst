@@ -13,7 +13,7 @@ answer is better and cheaper, and this file says by how much.
 **The honest headline.** On the hedging problem, the best agent here leaves a residual of
 **0.354** of the option price against Hedged Monte Carlo's **0.305** — 16% worse — after
 which more data does not help and a finer action grid does not help. That gap is structural,
-and §3 says what it is.
+and §3 says what it is (corrected in Session N: not the argmax).
 
 ---
 
@@ -88,13 +88,28 @@ closes it:
 | agent | 0.4663 | 0.3816 | 0.3612 | 0.3543 | 0.3550 |
 | BS on the same grid | 0.4955 | 0.3902 | 0.3661 | 0.3596 | 0.3581 |
 
-The reward is quadratic in the action, so its optimum is the vertex of a parabola. Hedged
-Monte Carlo *solves for that vertex* by least squares, using every path at once and the
-quadratic structure. The agent estimates each arm separately and compares neighbours, which
-throws the structure away: the argmax has to resolve differences between adjacent actions
-that are small next to the noise in `(dW)²`. Adding arms makes each one noisier, adding data
-shrinks the noise but not the estimator's blindness to the shape. **When you know the
-reward's structure, estimate it; the argmax is what you use when you do not.**
+**It is not the argmax** — Session M said it was, and Session N measured otherwise. An agent
+that fits Q as an explicit quadratic in the action and acts at the vertex (`quadratic-q`)
+scores 0.3541 against the argmax's 0.3543. `study_rl.py D` attributes the whole gap:
+
+| step | residual / price | share of the gap |
+|---|---|---|
+| fitted-Q, argmax | 0.3543 | |
+| quadratic-Q, at the vertex | 0.3541 | 0.4% |
+| known-reward regression (Black–Scholes mark) | 0.3276 | **53.7%** |
+| …with a martingale mark | 0.3091 | **37.4%** |
+| …one coefficient per date | 0.3068 | 4.8% |
+| …on Hedged Monte Carlo's basis | 0.3048 | 3.9% |
+| Hedged Monte Carlo | 0.3050 | |
+
+The agent learns the reward −(ΔC − aΔS)² as a black box; a regression of ΔC on basis·ΔS
+(`hedging_env.known_reward_fit`) uses its form and never models E[ΔS² | s]. And the
+environment's Black–Scholes mark is not a martingale under the rough model, so one-step
+risks do not add up to the total; `build_batch(..., mark=hedging_env.hmc_mark(fit, paths, K))`
+swaps in one that is. Run the other way round — the martingale mark given to the agents —
+the mark alone is worth 44.3% and the known reward alone 54.2%, additive to within 6.9%.
+**When you know the reward's structure, estimate it; and make the mark a martingale before
+you sum one-step rewards.**
 
 **The state is only approximately Markov.** On 960 000 transitions the lag block is
 statistically significant for every target and explains 0.02%, 0.65% and 0.21% of the

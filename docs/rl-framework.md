@@ -1,8 +1,9 @@
 # A reinforcement-learning framework, and what it is worth here
 
-*Session M, 26 September 2026. `rl/` (7 modules), `study_rl.py`, `test_rl.py` (41 checks),
+*Session M, 26 September 2026. `rl/` (7 modules), `study_rl.py`, `test_rl.py` (47 checks),
 four standing health checks, `captures/rl.{json,log,png}`. Quick reference: `rl/README.md`.
-Revert: `git rm -r rl study_rl.py test_rl.py docs/rl-framework.md` — nothing else imports it.*
+Revert: `git rm -r rl study_rl.py test_rl.py docs/rl-framework.md` — nothing else imports it.
+Session N (27 September) corrected §3: the gap to Hedged Monte Carlo is not the argmax.*
 
 ## What was asked for
 
@@ -114,16 +115,51 @@ The agent is converged from 2,000 paths, and the grid stops binding above 11 act
 agent beats BS-on-the-same-grid at every resolution, so it is genuinely learning; it simply
 stops 16% short of the derived answer.
 
-**The reason is the argmax.** The reward is quadratic in the action, so its optimum is a
-parabola's vertex. Hedged Monte Carlo *solves for that vertex* by least squares, using every
-path at once and the quadratic structure. The agent fits each arm separately and compares
-neighbours, which throws the structure away: it must resolve differences between adjacent
-actions that are small beside the noise in (dW)². More arms make each noisier; more data
-shrinks the noise but not the estimator's blindness to the shape.
+**Session M said the reason was the argmax. It was not** (corrected in Session N). The
+reward is quadratic in the action, so the suspect was the agent fitting each arm separately
+and comparing neighbours instead of locating the parabola's vertex. The direct test is an
+agent that fits Q(s, a) as an explicit quadratic in a, from every row at once, and acts at
+the vertex (`quadratic-q`). It scores **0.3541 against the argmax's 0.3543 — 0.4% of the
+gap**. Section D of `study_rl.py` then attributes the whole gap, one change at a time, on the
+same paths:
 
-**When you know the reward's structure, estimate it. The argmax is what you use when you do
-not.** That is the honest boundary of this framework's usefulness, and it is why the
-framework is off by default rather than wired into the pipeline.
+| step | residual / price | share of the gap |
+|---|---|---|
+| fitted-Q, argmax (Session M) | 0.3543 | |
+| quadratic-Q, at the vertex | 0.3541 | 0.4% |
+| known-reward regression (Black–Scholes mark, pooled) | 0.3276 | **53.7%** |
+| …with a martingale mark | 0.3091 | **37.4%** |
+| …one coefficient per date | 0.3068 | 4.8% |
+| …on Hedged Monte Carlo's basis | 0.3048 | 3.9% |
+| Hedged Monte Carlo | 0.3050 | reproduced to 0.0002 |
+
+Two things carry 91% of it:
+
+- **Learning a reward whose form is known.** The agent regresses the realised reward
+  −(ΔC − aΔS)² on state and action, so it learns E[ΔC ΔS | s] and E[ΔS² | s] through a
+  squared, heavy-tailed target. The known-reward regression uses the form instead — it
+  regresses ΔC on basis·ΔS, whose solution is the same risk-minimising hedge — and never has
+  to model E[ΔS² | s] at all (`rl.hedging_env.known_reward_fit`).
+- **The mark.** The environment values the option at each rebalance by Black–Scholes at the
+  filtered σ̂, which is not a martingale under the simulated rough Heston model. Then
+  minimising each step's squared error is not minimising the variance of the total, because
+  the steps are serially correlated. Hedged Monte Carlo's own fitted value
+  (`rl.hedging_env.hmc_mark`) is a regression estimate of E[C_next | s], a martingale up to
+  fitting error.
+
+A chain splits a gap in one order, so the section also runs the other: the martingale mark
+handed to the agents, the reward still learned. Fitted-Q goes to 0.3324 (44.3% of the gap)
+and the vertex agent to 0.3307 (47.9%). The mark alone is worth 44.3%, the known reward alone
+54.2%, and both together 91.5% — additive to within 6.9% of the gap, so the split is not an
+artefact of the order.
+
+**When you know the reward's structure, estimate it** — the lesson survives, with the right
+reason: not because an argmax cannot find a vertex (it finds it as well as the vertex agent
+does), but because a regression on the known form discards the noise a learned reward has to
+carry. And a second one for anyone writing an environment: **the one-step rewards only add up
+to the objective if the mark is a martingale.** That is the honest boundary of this
+framework's usefulness, and it is why the framework is off by default rather than wired into
+the pipeline.
 
 ### 4. The state is only approximately Markov
 
@@ -230,6 +266,8 @@ Not nothing, and the boundary is sharp:
   written down. That is the first problem in this codebase an agent could win.
 - Charge `switch_penalty` properly and re-run the filtering comparison against a switching
   implementation rather than against logged full runs.
-- The argmax finding suggests a hybrid worth measuring: fit Q(s, a) as an explicit quadratic
-  in a and solve for the vertex. That is Hedged Monte Carlo again, arrived at from the RL
-  side, which would be a tidy way to show they are the same object.
+- ~~Fit Q(s, a) as an explicit quadratic in a and solve for the vertex.~~ Done in Session N
+  (`quadratic-q`), and it refuted the diagnosis that suggested it: the vertex scores what
+  the argmax scores. What does reach Hedged Monte Carlo is the known-reward regression with
+  a martingale mark, one coefficient per date, on HMC's basis — which is HMC itself, so the
+  two ARE the same object, arrived at by changing four things rather than one.

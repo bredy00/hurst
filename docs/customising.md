@@ -115,6 +115,21 @@ And run the Markov test on your state before you bootstrap through it
 (`rl.markov.markov_test`). It is the one assumption an MDP cannot do without, and this
 project's own hedging state only passes it approximately.
 
+If your environment differences a mark, make the mark a martingale. The hedging
+environment's default is Black-Scholes at the filtered vol, which is not one under the rough
+model, and Session N measured that alone at 44% of the agents' gap to Hedged Monte Carlo.
+`build_batch` takes the mark as an argument:
+
+```python
+import models.hedging as hd, rl.hedging_env as he
+fit = hd.hmc_fit(paths, 1.0, 4)
+batch, grid, dates = he.build_batch(paths, 1.0, 4, mark=he.hmc_mark(fit, paths, 1.0))
+```
+
+And if the reward's form is known, as a hedge's is, a regression on that form beats learning
+it: `he.known_reward_fit` is the worked example, and `study_rl.py D` shows what each step of
+the way from an agent to it is worth.
+
 ## 5. Change the portfolio trial
 
 `portfolio/` is self-contained. `backtest.Config` carries every knob, and

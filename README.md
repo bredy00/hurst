@@ -54,7 +54,8 @@ study_lift_44.py                      N = 40 / 44 / 48: the kernel, prices, cost
 study_egarch.py                       the T-EGARCH scan against rough Heston, with the true variance as the answer
 study_trial_bl_hurst.py               the Session L trial: Black-Litterman, FF4 and a dual Kalman filter on H
 study_rl.py                           the reinforcement-learning framework, graded against what is already here
-volsurf.py                            one entry point: doctor, health, test, demo, pipeline, study, rl, record
+study_h_error_bars.py                 Session N: the robust SE on H graded against its real spread, 21 seeds
+volsurf.py                            one entry point: doctor, health, test, demo, pipeline, study, rl, record, guard
 benchmark_riccati.py                  einsum vs matmul vs pinned BLAS in the Riccati step, per n_u
 debug_fbm_helper.py                   the Session A fBm fixture bug, reproduced
 debug_fd_methods.py                   which 2nd-derivative stencil holds order on real grids
@@ -69,17 +70,21 @@ test_rough.py                         81 checks   (Session D + G + I: kernel, li
 test_rough_calibration.py             35 checks   (Session E: calibration, H, skew; G: weights)
 test_hawkes.py                        52 checks   (Session F1 + I: Hawkes on three hosts, jump size by impact)
 test_filters.py                       46 checks   (Session F2 + G: Kalman on three hosts, learning H)
-test_recording.py                     37 checks   (Session G: IBKR recording offline, pipeline end to end)
+test_recording.py                     38 checks   (Session G: IBKR recording offline, pipeline end to end)
 test_clock.py                         45 checks   (Session H: NYSE calendar, variance time, omega estimator)
 test_nongaussian.py                   20 checks   (Session H: particle and cf filters; slow tier)
-test_protocol.py                       9 checks   (Session I: RV cf filter, zero-boundary protocol)
+test_protocol.py                      14 checks   (Session I: RV cf filter, zero-boundary protocol; N: robust SE)
 test_fbm.py                           23 checks   (Session I: exact fGn / fBm, Breuer-Major; L: any covariance)
 test_hedging.py                       14 checks   (Sessions J-K: hedged Monte Carlo, variance swap)
 test_egarch.py                        17 checks   (Session L: EGARCH-t, Beta-t-EGARCH, GARCH)
 test_portfolio.py                     42 checks   (Session L trial: demo market, Black-Litterman, dual Kalman)
-test_rl.py                            41 checks   (Session M: the MDP, the agents, the Markov test, both environments)
+test_rl.py                            47 checks   (Session M: the MDP, the agents, the Markov test, both environments;
+                                                   N: the vertex agent, the known-reward regression, the mark)
+test_har.py                           13 checks   (Session N: HAR-RV -- design, recovery, log-HAR correction, QLIKE)
+test_volsurf.py                        4 checks   (Session N: the entry point and the licensed-data guard)
 rl/                                   reinforcement learning, OFF by default (7 modules; delete to revert)
 models/egarch.py                      EGARCH(p,q)-t, Beta-t-EGARCH and GARCH: one interface, BIC scan, QLIKE
+models/har.py                         HAR-RV at any horizon; log-HAR with its lognormal correction; Newey-West
 portfolio/                            the Session L trial, self-contained (5 modules; delete to revert)
 conftest.py / pytest.ini              every suite runs under pytest; `-m "not slow"` is the quick tier
 .github/workflows/ci.yml              quick tier on push; full tier + health trend weekly / on demand
@@ -89,7 +94,7 @@ docs/session-i-report.pdf             Session I: the decisions implemented, the 
 docs/study-lift-44.md                 Session L: 44 nodes, what they buy, and how they were paid for
 docs/study-egarch.md                  Session L: the T-EGARCH scan; BIC ranks the t models first, they forecast worst
 docs/trial-bl-hurst.md                Session L: the dual-Kalman-on-H trial, and why it does not work as stated
-docs/rl-framework.md                  Session M: the RL framework, and the argmax finding that bounds its use
+docs/rl-framework.md                  Session M: the RL framework; Session N: what the gap to HMC really is
 docs/customising.md                   the seams designed to be changed, with examples that run
 rl/README.md                          the RL quick reference: what it buys, and what it does not
 docs/overview-2026-09-15.pdf          Sessions A-H overview and recommendations
@@ -107,22 +112,25 @@ captures/                             frames, GIFs, comparisons, snapshot.json
 .venv/Scripts/python.exe test_models.py   # 25 passed
 .venv/Scripts/python.exe test_pricing.py  # 29 passed
 .venv/Scripts/python.exe test_calibrate.py # 65 passed
-.venv/Scripts/python.exe test_rough.py     # 76 passed, ~8 min
+.venv/Scripts/python.exe test_rough.py     # 81 passed, ~8 min
 .venv/Scripts/python.exe test_rough_calibration.py  # 35 passed, ~4 min
 .venv/Scripts/python.exe capture_rough_vs_heston.py # Phase 2 headline, ~6 min
 .venv/Scripts/python.exe test_hawkes.py    # 52 passed, ~20 s
 .venv/Scripts/python.exe test_egarch.py    # 17 passed, ~25 s
 .venv/Scripts/python.exe test_portfolio.py # 42 passed, ~5 s
-.venv/Scripts/python.exe test_rl.py        # 41 passed, ~20 s
+.venv/Scripts/python.exe test_rl.py        # 47 passed, ~25 s
+.venv/Scripts/python.exe test_har.py       # 13 passed, ~2 s
+.venv/Scripts/python.exe test_volsurf.py   # 4 passed, ~1 s
 .venv/Scripts/python.exe test_filters.py   # 46 passed, ~10 min
 .venv/Scripts/python.exe capture_session_f.py # Session F figure
 .venv/Scripts/python.exe -m pytest -m "not slow"  # quick tier, ~3 min
-.venv/Scripts/python.exe test_recording.py # 37 passed, ~30 s
-.venv/Scripts/python.exe -m pytest                # everything: 132 items, 781 checks (CI: 12 min)
+.venv/Scripts/python.exe test_recording.py # 38 passed, ~30 s (3 min on a throttled laptop)
+.venv/Scripts/python.exe -m pytest                # everything: 140 items, 810 checks (CI: ~12 min)
 .venv/Scripts/python.exe record_chains.py --check # IBKR smoke test (needs IB Gateway)
 .venv/Scripts/python.exe run_real_data.py --synthetic   # pipeline on a known answer
 .venv/Scripts/python.exe volatility_surface_3.py --demo # the live dashboard on a fake market, no TWS
-.venv/Scripts/python.exe healthcheck.py --trend         # 132 analytical checks + trends
+.venv/Scripts/python.exe healthcheck.py --trend         # 137 analytical checks + trends
+.venv/Scripts/python.exe volsurf.py guard              # refuses if a public repo would publish recordings
 .venv/Scripts/python.exe capture_heston.py      # Heston's own skew term structure
 .venv/Scripts/python.exe capture_calibration.py # Phase 1 baseline vs a rough surface
 .venv/Scripts/python.exe capture_v3.py    # re-render + end-to-end validation
@@ -808,9 +816,10 @@ have a known optimum. Full account: `docs/rl-framework.md`; quick reference: `rl
   same paths it holds *less* than the Black-Scholes delta, as the analytic hedge does --
   the leverage adjustment, learned -- and gets about half the distance. It still leaves
   **0.354 of the price against HMC's 0.305**, and neither more data (2k to 128k paths) nor
-  a finer action grid (3 to 41) closes it. **The reward is quadratic in the action: HMC
-  solves for the parabola's vertex, the argmax compares noisy neighbours.** When you know
-  the reward's structure, estimate it.
+  a finer action grid (3 to 41) closes it. *(Session M blamed the argmax; Session N measured
+  otherwise -- an agent acting at the quadratic's vertex scores the same. The gap is learning
+  a known reward as a black box and a Black-Scholes mark that is not a martingale; see
+  below.)* When you know the reward's structure, estimate it.
 - **Check that you have an MDP before paying for one.** The writer's hedge does not move the
   market, so the next state does not depend on the action and the problem is a bandit. The
   myopic agent is better *and twenty times cheaper* than the bootstrapped one.
@@ -825,10 +834,59 @@ have a known optimum. Full account: `docs/rl-framework.md`; quick reference: `rl
   `study`, `rl`, `record` -- and `docs/customising.md` walks the six seams designed to be
   changed, with examples that run.
 
+## Session N (2026-09-27) -- honest error bars, a corrected diagnosis, and two guards
+
+Five improvements across the system, each graded against something that knows the answer.
+
+- **The error bar on H is honest now** (`filters.kalman.robust_profile_se`,
+  `study_h_error_bars.py`). Session L found the profile likelihood's curvature reporting H
+  about three times too precisely. The filter is a Gaussian *quasi*-likelihood for a process
+  that is neither Gaussian nor linear, so the curvature is the wrong error bar; the sandwich
+  -- per-day scores from the `loglik_t` Session M added, Newey-West long-run variance -- is
+  the right one. Over 21 histories with H = 0.10 planted: the curvature SE is 0.37x the
+  estimate's real spread and its 95% intervals cover the truth in **47%** of histories; the
+  robust SE is 0.85x and covers **89%** (pre-registered: within 25% of the spread -- PASS).
+  It is exact where it can be checked exactly: ratio 0.992 on a correctly specified Gaussian
+  model, 1.998 when the data's sd is twice the model's, and Newey-West doubling the error
+  for AR(1) scores with rho = 0.6, as (1 + rho)/(1 - rho) = 4 says it must. The pipeline's
+  report now states the robust SE, with the curvature's beside it. **It fixes the width, not
+  the bias**: the estimate still sits +0.046 above the truth on average.
+- **Session M's diagnosis was wrong, and the gap is now fully attributed** (`quadratic-q`,
+  `rl.hedging_env.known_reward_fit`, `study_rl.py D`). An agent that fits Q as an explicit
+  quadratic in the hedge ratio and acts at the vertex scores 0.3541 against the argmax's
+  0.3543, so the argmax was never the problem. One change at a time: treating the known
+  reward -(dC - a dS)^2 as a black box costs **53.7%** of the gap to Hedged Monte Carlo;
+  the Black-Scholes mark, which is not a martingale under the rough model, **37.4%**;
+  pooling across dates 4.8%; the basis 3.9%. The last row reproduces HMC to 0.0002. Run in
+  the other order -- the martingale mark given to the agents -- the effects add up to within
+  6.9% of the gap, so the split is not an artefact of the order.
+- **HAR-RV is a model, not an inline helper** (`models/har.py`, `test_har.py`): any horizon,
+  the log-HAR with its lognormal correction exp(s^2/2) (checked on the residuals to 0.03%),
+  Newey-West errors whose lag covers an overlapping multi-day target, and QLIKE.
+  `study_egarch.py` now uses it and reproduces its old inline HAR to 1.6e-17.
+- **CI runs the falsify agreement checks.** falsify is checked out beside the project,
+  pinned by SHA, so the two checks proving its regression agrees with `portfolio/factor_fit`
+  run on every push instead of only on this laptop. **A correction:** the one-check gap
+  between CI's count and this laptop's (630 against 631) was first reported as a platform
+  difference. It was this -- falsify missing on CI, so `test_portfolio` ran one fallback
+  check instead of two.
+- **A licensed-data guard** (`python volsurf.py guard`, a CI step, and a standing health
+  check). The recorder writes IBKR data under `captures/real/`, which `.gitignore` leaves
+  trackable on purpose so a *private* repository backs it up. On a public repository the
+  same rule would publish licensed data on the first commit after the account goes live --
+  the one mistake here that cannot be undone. The guard refuses exactly that case; the
+  gitignored report and synthetic output are exempt.
+
 ## Still open
 
 - **Real data has not been recorded yet.** It waits on the IBKR account's validation.
   Everything downstream has run end to end on synthetic recordings with a known answer.
+- **The history filter's H is biased upward on 500 days.** Session N made its error bar
+  honest; the estimate itself still sits +0.046 above a planted 0.10 on average over 21
+  seeds (`captures/h_error_bars.json`), and two of the 21 landed on the grid's edge. The
+  filter bank's posterior sd is built from the same quasi-likelihood and is as
+  over-confident as the curvature (+/- 0.023 against a robust 0.053 on the synthetic run);
+  tempering its likelihood by 1/ratio^2 is the natural fix and is not done.
 - **The cf filter at a hard boundary.** It is 0.43 nats a day short of the converged
   particle filter at a host that sits at zero on 64% of days. A richer posterior than
   gamma(V) x Gaussian(U | V) would close part of that.

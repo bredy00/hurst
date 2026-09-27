@@ -33,6 +33,7 @@ STUDIES = {
     "egarch": ("study_egarch.py", "the T-EGARCH scan against rough Heston's own integrated variance"),
     "trial": ("study_trial_bl_hurst.py", "Black-Litterman, FF4 and the dual Kalman filter on H"),
     "rl": ("study_rl.py", "the reinforcement-learning framework, graded"),
+    "h-error-bars": ("study_h_error_bars.py", "the profile's robust SE on H against its true spread, 21 seeds"),
     "finer-lift": ("study_finer_lift.py", "the Session H lift decision (24 / 32 / 40)"),
     "zero-boundary": ("study_zero_boundary.py", "Kalman vs cf vs particle filter at the zero boundary"),
     "fbm": ("study_fbm_methods.py", "fBm generators compared; Shevchenko's steps checked"),
@@ -155,6 +156,67 @@ def cmd_record(a):
     return _run(["record_chains.py", *(["--check"] if a.check else a.rest)])
 
 
+LICENSED_ROOT = "captures/real/"
+LICENSED_EXEMPT = ("captures/real/report/", "captures/real/synthetic/")
+
+
+def licensed_paths(paths):
+    """The recordings among `paths`: everything the recorder writes under captures/real/
+    (chains by symbol and day, session.jsonl, history_*.json), less the gitignored report
+    and synthetic output, which contain no market data."""
+    out = []
+    for p in paths:
+        q = p.replace("\\", "/")
+        if q.startswith(LICENSED_ROOT) and not q.startswith(LICENSED_EXEMPT):
+            out.append(q)
+    return out
+
+
+def repo_visibility():
+    """'public', 'private', or None when it cannot be determined (no gh, no network)."""
+    try:
+        out = subprocess.run(["gh", "repo", "view", "--json", "visibility", "-q", ".visibility"],
+                             cwd=str(ROOT), capture_output=True, text=True, timeout=20)
+        v = out.stdout.strip().lower()
+        return v if v in ("public", "private", "internal") else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def cmd_guard(a):
+    """
+    Refuse to let licensed market data reach a public repository.
+
+    The IBKR recordings are licensed; the recorder writes them under captures/real/, and
+    .gitignore deliberately leaves them trackable so a PRIVATE repository backs them up. On a
+    public repository that same rule would publish them on the first commit after the
+    account goes live -- an irreversible mistake, since a pushed file is copied and cached.
+    Locally this checks tracked files AND the untracked files `git add -A` would pick up;
+    in CI (`--ci public|private`) it checks what the checkout holds.
+    """
+    vis = a.ci or repo_visibility()
+    tracked = subprocess.run(["git", "ls-files"], cwd=str(ROOT), capture_output=True,
+                             text=True).stdout.split()
+    stageable = [] if a.ci else subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"], cwd=str(ROOT),
+        capture_output=True, text=True).stdout.split()
+    hit_t, hit_s = licensed_paths(tracked), licensed_paths(stageable)
+    print(f"repository visibility: {vis or 'unknown (gh unavailable)'}")
+    print(f"recordings tracked by git: {len(hit_t)}; untracked but stageable: {len(hit_s)}")
+    for p in (hit_t + hit_s)[:10]:
+        print(f"  {p}")
+    if vis == "public" and (hit_t or hit_s):
+        print("\nREFUSED: licensed recordings would be published by this public repository. "
+              "Make the repository private, or add captures/real/ to .gitignore, before committing.")
+        return 1
+    if vis is None and (hit_t or hit_s):
+        print("\nWARNING: recordings present and the visibility could not be checked; confirm the "
+              "repository is private before pushing.")
+        return 0 if not a.strict else 1
+    print("ok: nothing licensed can be published from here")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="volsurf.py", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -182,6 +244,10 @@ def main(argv=None):
     p.add_argument("--check", action="store_true")
     p.add_argument("rest", nargs="*")
     p.set_defaults(fn=cmd_record)
+    p = sub.add_parser("guard", help="refuse to publish licensed recordings from a public repo")
+    p.add_argument("--ci", choices=("public", "private", "internal"), help="visibility, as CI knows it")
+    p.add_argument("--strict", action="store_true", help="fail when the visibility is unknown")
+    p.set_defaults(fn=cmd_guard)
 
     a = ap.parse_args(argv)
     if not a.cmd:
