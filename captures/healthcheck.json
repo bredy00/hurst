@@ -3,21 +3,21 @@
   {
    "group": "Engineering",
    "name": "CPU reference workload",
-   "measured": 0.39047649991698563,
+   "measured": 1.6304194999393076,
    "threshold": Infinity,
    "ok": true,
    "unit": "s",
-   "note": "best of 3; 1.69x the fastest of this machine's last 8 runs -- THROTTLED",
+   "note": "best of 3; 7.05x the fastest of this machine's last 10 runs -- THROTTLED",
    "trend": true
   },
   {
    "group": "Markovian lift",
    "name": "rough objective evaluation, 10 expiries x 13 strikes",
-   "measured": 0.6693394999019802,
+   "measured": 2.2217843000544235,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
-   "note": "best of 3 (all: 0.67, 0.68, 0.67); trend target: rolling mean <= 0.75 s; THROTTLED 1.69x: judged at 0.40 s, not added to the trend",
+   "note": "best of 3 (all: 2.22, 2.28, 2.37); trend target: rolling mean <= 0.75 s; THROTTLED 7.05x: judged at 0.32 s, not added to the trend",
    "trend": false
   },
   {
@@ -263,7 +263,7 @@
   {
    "group": "Pricers",
    "name": "risk-neutral density mass",
-   "measured": 0.9999999999928445,
+   "measured": 0.999999999991692,
    "threshold": 1.0,
    "ok": true,
    "unit": "",
@@ -273,7 +273,7 @@
   {
    "group": "Pricers",
    "name": "risk-neutral density mean = forward",
-   "measured": 1.0000000000006755,
+   "measured": 0.999999999996068,
    "threshold": 1.0,
    "ok": true,
    "unit": "",
@@ -293,11 +293,11 @@
   {
    "group": "Pricers",
    "name": "sampling density: min >= eps and mass = 1",
-   "measured": 2.220446049250313e-16,
+   "measured": 0.0,
    "threshold": 1e-12,
    "ok": true,
    "unit": "",
-   "note": "floored 624 pts, removed -5.1e-10 of mass",
+   "note": "floored 622 pts, removed -5.1e-10 of mass",
    "trend": true
   },
   {
@@ -417,7 +417,7 @@
    "threshold": 0.01,
    "ok": true,
    "unit": "rel",
-   "note": "7 iters, 0.6s",
+   "note": "7 iters, 1.9s",
    "trend": true
   },
   {
@@ -963,7 +963,7 @@
   {
    "group": "Positivity (Session G)",
    "name": "exact-moment filter: QML kappa bias away from zero, 16-substep data, mean z",
-   "measured": 0.04013272360534992,
+   "measured": 0.04013272360763759,
    "threshold": 2.0,
    "ok": true,
    "unit": "SE",
@@ -1023,7 +1023,7 @@
   {
    "group": "Learning H (Session G)",
    "name": "filter profile likelihood: |H_hat - 0.12| in SE",
-   "measured": 1.1773530193170194,
+   "measured": 1.1773530193174295,
    "threshold": 3.0,
    "ok": true,
    "unit": "SE",
@@ -1033,7 +1033,7 @@
   {
    "group": "Learning H (Session G)",
    "name": "log-likelihood of H = 0.49 against the best H",
-   "measured": -308.68740047210304,
+   "measured": -308.6874004721076,
    "threshold": -20.0,
    "ok": true,
    "unit": "",
@@ -1043,7 +1043,7 @@
   {
    "group": "Zero boundary (Session H)",
    "name": "variance cf (Riccati) vs exact affine mean and variance, 1 day",
-   "measured": 4.75521084286612e-07,
+   "measured": 4.7552107340642635e-07,
    "threshold": 1e-06,
    "ok": true,
    "unit": "rel",
@@ -1053,7 +1053,7 @@
   {
    "group": "Zero boundary (Session H)",
    "name": "away from zero, 400 days: both filters' log-likelihood vs Kalman",
-   "measured": 1.5081275879425675,
+   "measured": 1.5081275879417717,
    "threshold": 3.0,
    "ok": true,
    "unit": "nats",
@@ -1063,7 +1063,7 @@
   {
    "group": "Zero boundary (Session H)",
    "name": "near zero (V = 0 on 17% of days): particle log-likelihood gain over Kalman",
-   "measured": 76.15885139715556,
+   "measured": 76.1588513971559,
    "threshold": 20.0,
    "ok": true,
    "unit": "nats",
@@ -1073,7 +1073,7 @@
   {
    "group": "Zero boundary (Session H)",
    "name": "near zero: CF filter vs particle filter log-likelihood",
-   "measured": 0.359626265375141,
+   "measured": 0.3596262653746862,
    "threshold": 6.0,
    "ok": true,
    "unit": "nats",
@@ -1153,7 +1153,7 @@
   {
    "group": "Hedging (Session J)",
    "name": "hedged Monte Carlo price vs the cf price",
-   "measured": 1.086487796214414,
+   "measured": 1.0864877962143178,
    "threshold": 3.0,
    "ok": true,
    "unit": "SE",
@@ -1173,7 +1173,7 @@
   {
    "group": "Hedging (Session J)",
    "name": "residual with the variance swap / with the underlying alone",
-   "measured": 0.3855591734717323,
+   "measured": 0.385559173471731,
    "threshold": 0.6,
    "ok": true,
    "unit": "",
@@ -1261,6 +1261,56 @@
    "trend": true
   },
   {
+   "group": "Session N: error bars, HAR, the vertex, the guard",
+   "name": "robust SE = curvature SE when the model is right",
+   "measured": 0.007572014472180477,
+   "threshold": 0.05,
+   "ok": true,
+   "unit": "",
+   "note": "ratio 0.992; unit-variance data, unit-variance model",
+   "trend": true
+  },
+  {
+   "group": "Session N: error bars, HAR, the vertex, the guard",
+   "name": "robust SE = 2x curvature SE when the data's sd is 2",
+   "measured": 0.0010326967218519112,
+   "threshold": 0.05,
+   "ok": true,
+   "unit": "",
+   "note": "ratio 1.998; the curvature SE cannot see this",
+   "trend": true
+  },
+  {
+   "group": "Session N: error bars, HAR, the vertex, the guard",
+   "name": "HAR recovers planted coefficients (worst |z|)",
+   "measured": 2.4936635003228385,
+   "threshold": 3.0,
+   "ok": true,
+   "unit": "",
+   "note": "models/har.py: 1/5/22-day trailing means, Newey-West errors",
+   "trend": true
+  },
+  {
+   "group": "Session N: error bars, HAR, the vertex, the guard",
+   "name": "quadratic-Q finds a vertex between grid points",
+   "measured": 0.0022603589362444054,
+   "threshold": 0.02,
+   "ok": true,
+   "unit": "",
+   "note": "grid step 0.10; worst |a* - planted vertex|",
+   "trend": true
+  },
+  {
+   "group": "Session N: error bars, HAR, the vertex, the guard",
+   "name": "licensed recordings a public repository would publish",
+   "measured": 0.0,
+   "threshold": 0.0,
+   "ok": true,
+   "unit": "",
+   "note": "captures/real/ is trackable by design: safe only while the repository is private",
+   "trend": false
+  },
+  {
    "group": "Engineering",
    "name": "scipy modules on the live import path",
    "measured": 0,
@@ -1273,7 +1323,7 @@
   {
    "group": "Engineering",
    "name": "startup to actionable error, no TWS",
-   "measured": 0.7864852999337018,
+   "measured": 1.829431900056079,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
@@ -1283,7 +1333,7 @@
   {
    "group": "Engineering",
    "name": "calibration objective evaluation",
-   "measured": 15.665159979835153,
+   "measured": 48.54615998920053,
    "threshold": 200.0,
    "ok": true,
    "unit": "ms",
@@ -1321,7 +1371,7 @@
    "trend": true
   }
  ],
- "seconds": 139.4005068000406,
+ "seconds": 603.3231458000373,
  "python": "3.12.3",
  "numpy": "2.5.2"
 }

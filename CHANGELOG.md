@@ -33,6 +33,13 @@ Full accounts: README "Session N", `docs/rl-framework.md` §3, `study_h_error_ba
 - CI checks out falsify beside the project, pinned by SHA, so the falsify agreement checks
   run there too; `pytest.ini` keeps pytest out of that checkout.
 
+#### Fixed
+- The health check's trend flagged a density's mass error moving from 1.7e-16 to exactly 0
+  as a drift of z = -1e6: its spread floor was relative, and vanishes with the value. It
+  now also has a rounding floor, 64 ulps at unit scale capped at a thousandth of the check's
+  threshold, which only affects values at machine precision (38 of 136 checks).
+- The report printed the structure-function H and its r^2 to seventeen digits.
+
 #### Corrected
 - **The Session M hedging diagnosis.** The gap was put down to the argmax comparing noisy
   neighbours instead of locating the parabola's vertex. The vertex agent scores 0.3541

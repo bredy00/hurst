@@ -1419,6 +1419,20 @@ def load_history(last=None):
     return rows[-last:] if last else rows
 
 
+ROUNDING = 64 * float(np.finfo(float).eps)      # ~1.4e-14: below this at unit scale, a change is rounding
+
+
+def _thresholds():
+    """Each check's threshold, from this run when it has one, else from the last saved run."""
+    if RESULTS:
+        return {r["name"]: r["threshold"] for r in RESULTS}
+    try:
+        saved = json.loads((ROOT / "captures" / "healthcheck.json").read_text(encoding="utf-8"))
+        return {r["name"]: r["threshold"] for r in saved["results"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
 def trend_report(rows=None):
     """
     Per check over the recorded runs ON THIS MACHINE CLASS: n, mean, std, last,
@@ -1434,7 +1448,17 @@ def trend_report(rows=None):
     compared only within a machine class (rows from before hosts were recorded
     count as this laptop's), and the spread has a floor of 1e-6 of the value. Since
     Session I also only within one model configuration (config_key).
+
+    Session N added a rounding floor. A relative floor vanishes with the value, so a quantity
+    that IS rounding noise -- a density's mass error moving from 1.7e-16 to exactly 0 --
+    read as z = -1e6. The floor is a few dozen ulps at unit scale (ROUNDING), capped at a
+    thousandth of the check's own threshold so an identity held to 1e-15 stays as sensitive
+    as it was. It changes nothing for values away from zero, where the relative floor is
+    larger; a first version floored at a thousandth of the threshold outright, which blinded
+    the monitor on 121 of 136 checks (a condition number of 30 against a threshold of 1e8
+    could have moved by 1e5 unflagged).
     """
+    thresholds = _thresholds()
     rows = load_history() if rows is None else rows
     if not rows:
         return []
@@ -1456,7 +1480,12 @@ def trend_report(rows=None):
         mean, std, last = float(v.mean()), float(v.std(ddof=1)) if v.size > 1 else 0.0, float(v[-1])
         if v.size > 2:
             prev = v[:-1]
-            spread = max(float(np.std(prev, ddof=1)), 1e-6 * abs(float(prev.mean())), 1e-300)
+            t = thresholds.get(name)
+            if isinstance(t, (int, float)) and np.isfinite(t):
+                r_floor = min(ROUNDING, 1e-3 * abs(float(t)))
+            else:
+                r_floor = ROUNDING
+            spread = max(float(np.std(prev, ddof=1)), 1e-6 * abs(float(prev.mean())), r_floor, 1e-300)
             z = float((last - prev.mean()) / spread)
         else:
             z = 0.0
