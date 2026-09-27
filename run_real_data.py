@@ -228,8 +228,14 @@ def analyse_history(data, dt=1.0 / 252, max_days=750, profile_names=("xi",), con
     p0 = dict(kappa=3.0, theta=theta0, xi=0.3, R=1e-10)
     prof = kf.profile_h(y, H_GRID, p0, dt, theta0, names=profile_names, model_cls=rv_model)
     bank = kf.filter_bank(prof["runs"], H_GRID)
+    rob = prof.get("se_robust_detail") or {}
     out["rough_profile"] = {"H": list(H_GRID), "loglik_minus_max": (prof["loglik"] - prof["loglik"].max()).tolist(),
                             "H_hat": prof["H_hat"], "se": prof["se_quadratic"], "ci95": prof["ci95"],
+                            # the curvature SE assumes the filter's likelihood is the data's; the
+                            # robust one does not (filters.kalman.robust_profile_se), and their
+                            # ratio says how far apart the two are
+                            "se_robust": prof.get("se_robust", float("nan")),
+                            "se_ratio": rob.get("ratio", float("nan")),
                             "xi_by_H": [q[profile_names[0]] for q in prof["params"]] if profile_names else None,
                             "bank_mean": float(bank["mean"][-1]), "bank_sd": float(bank["sd"][-1]),
                             "loglik_vs_cir": float(prof["loglik"].max() - fit["loglik"])}
@@ -423,11 +429,16 @@ def run(snapshot=None, history=None, scheme="hybrid", out_dir=None, synthetic=Fa
         report["history_file"] = str(history) if not isinstance(history, dict) else "in memory"
         hs = analyse_history(data, max_days=500 if quick else 750, confirm=not quick)
         report["history"] = hs
-        report["H"]["filter_profile"] = {"H": hs["rough_profile"]["H_hat"], "se": hs["rough_profile"]["se"]}
+        rp_ = hs["rough_profile"]
+        # the robust SE when it exists: the curvature one understates this estimator's spread
+        # about threefold on synthetic data (Session L), and the report should not
+        se_h = rp_["se_robust"] if np.isfinite(rp_.get("se_robust", float("nan"))) else rp_["se"]
+        report["H"]["filter_profile"] = {"H": rp_["H_hat"], "se": se_h, "se_curvature": rp_["se"],
+                                         "se_robust": rp_.get("se_robust")}
         report["H"]["structure_function"] = {"H": hs["H_structure"], "se": None}
         print(f"history: {hs['n_days']} days of {hs['source']}; CIR kappa {hs['cir']['params']['kappa']:.1f}; "
-              f"filter H {hs['rough_profile']['H_hat']:.3f} (se {hs['rough_profile']['se']:.3f}, bank "
-              f"{hs['rough_profile']['bank_mean']:.3f}); structure-function H {hs['H_structure']}", flush=True)
+              f"filter H {rp_['H_hat']:.3f} (se {se_h:.3f}; curvature {rp_['se']:.3f}; bank "
+              f"{hs['rough_profile']['bank_mean']:.3f}); structure-function H {_f3(hs['H_structure'])}", flush=True)
         if isinstance(data, dict) and data.get("truth"):
             report["truth_H"] = data["truth"]["H"]
     plot(report, S, fits, out_dir / "figure.png")
@@ -443,6 +454,30 @@ def _json_default(o):
     if isinstance(o, np.ndarray):
         return o.tolist()
     return str(o)
+
+
+def _f3(x):
+    """Three decimals for a number, and the value as it is otherwise (None when not estimated)."""
+    return f"{x:.3f}" if isinstance(x, (int, float, np.floating)) and np.isfinite(x) else str(x)
+
+
+def _h_error_text(rp):
+    """
+    The error bar on the history filter's H, as the report states it: the robust SE and its
+    interval when the profile's maximum is interior, with the curvature's SE and the
+    likelihood-ratio interval beside it and how far apart they are; the curvature's alone,
+    labelled as such, when there is no robust one.
+    """
+    H, se_c, (lo, hi) = rp["H_hat"], rp["se"], rp["ci95"]
+    se_r, ratio = rp.get("se_robust", float("nan")), rp.get("se_ratio", float("nan"))
+    if not np.isfinite(se_r):
+        return (f"se {se_c:.3f}, 95% {lo:.3f}-{hi:.3f}, both from the curvature; no robust se, because "
+                f"the maximum is on the grid's edge or the profile has no curvature there")
+    how = (f"{ratio:.1f}x too optimistic here" if ratio >= 1
+           else f"here {1 / ratio:.1f}x wider than the robust one")
+    return (f"robust se {se_r:.3f}, 95% {H - 1.96 * se_r:.3f}-{H + 1.96 * se_r:.3f}; the curvature's se "
+            f"{se_c:.3f} and likelihood-ratio 95% {lo:.3f}-{hi:.3f} assume the filter's model is the "
+            f"data's, {how}")
 
 
 def markdown(r):
@@ -479,9 +514,9 @@ def markdown(r):
                   f"- CIR MLE kappa {hs['cir']['params']['kappa']:.2f} "
                   + (f"(se {hs['cir']['se']['kappa']:.2f})" if np.isfinite(hs['cir']['se']['kappa'])
                      else "(se not available: the numerical Hessian at the optimum gives none)"),
-                  f"- lifted rough filter: H profile maximum {rp['H_hat']:.3f} (se {rp['se']:.3f}, 95% {rp['ci95'][0]:.3f}-{rp['ci95'][1]:.3f}); "
+                  f"- lifted rough filter: H profile maximum {rp['H_hat']:.3f} ({_h_error_text(rp)}); "
                   f"bank posterior {rp['bank_mean']:.3f} +/- {rp['bank_sd']:.3f}; log-likelihood over CIR {rp['loglik_vs_cir']:+.1f}",
-                  f"- structure function of log RV: H {hs['H_structure']} (r2 {hs['H_structure_r2']})"]
+                  f"- structure function of log RV: H {_f3(hs['H_structure'])} (r2 {_f3(hs['H_structure_r2'])})"]
         zb = hs.get("zero_boundary")
         if zb:
             line = (f"- zero boundary (at H = {zb['H']:.2f}): predicted variance within 2 sd of zero on "

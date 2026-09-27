@@ -41,3 +41,20 @@ C  cost of the same hedging answer, on 32 000 paths:
    the cheapest agent costs 1.6x Hedged Monte Carlo and does not reach it.
 
 [done in 129s] -> C:\Projects\volatility-surface-tuning\captures\rl.json
+
+# Session N (2026-09-27): python study_rl.py D
+   building the hedging batch (32000 training paths)...
+D  the gap to Hedged Monte Carlo (0.3050), attributed one change at a time:
+     fitted-Q, argmax (Session M)                 0.3543
+     quadratic-Q, at the vertex                   0.3541   closes   0.4% of the gap
+     known-reward regression (BS mark, pooled)    0.3276   closes  53.7% of the gap
+     ...with a martingale mark                    0.3091   closes  37.4% of the gap
+     ...one coefficient per date                  0.3068   closes   4.8% of the gap
+     ...on Hedged Monte Carlo's basis             0.3048   closes   3.9% of the gap
+     Hedged Monte Carlo                           0.3050   (the last row reproduces it to 0.0002)
+   the other order -- the martingale mark given to the agents, the reward still learned:
+     fitted-Q, argmax, martingale mark            0.3324   closes  44.3% of the gap
+     quadratic-Q, vertex, martingale mark         0.3307   closes  47.9% of the gap
+   the mark alone 44.3%, the known reward alone 54.2%, both 91.5%: additive to within 6.9% of the gap
+
+[done in 32s] -> C:\Projects\volatility-surface-tuning\captures\rl.json

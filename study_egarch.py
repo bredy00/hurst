@@ -34,6 +34,7 @@ import time
 import numpy as np
 
 import models.egarch as eg
+import models.har as har
 import models.rough_heston as rh
 import sources.history as hist
 import sources.synthetic as syn
@@ -76,16 +77,15 @@ def ewma(r, lam=0.94):
 
 
 def har_forecasts(rv, n_train):
-    """HAR-RV: RV_t on (RV_{t-1}, mean RV_{t-5..t-1}, mean RV_{t-22..t-1}), OLS on the training days."""
-    rv = np.asarray(rv, float)
-    c = np.concatenate([[0.0], np.cumsum(rv)])
-    mean_back = lambda t, k: (c[t] - c[t - k]) / k
-    X = np.array([[1.0, rv[t - 1], mean_back(t, 5), mean_back(t, 22)] for t in range(22, len(rv))])
-    y = rv[22:]
-    b = np.linalg.lstsq(X[:n_train - 22], y[:n_train - 22], rcond=None)[0]
+    """
+    HAR-RV (models/har.py since Session N), fitted on the training days: the forecast for
+    day t made at the close of day t-1, aligned to `rv`, and the coefficients. Reproduces the
+    inline version this study carried before to 1.6e-17.
+    """
+    m = har.fit(rv, horizon=1, log=False, train=n_train)
     f = np.full(len(rv), np.nan)
-    f[22:] = np.maximum(X @ b, 1e-12)
-    return f, b
+    f[1:] = har.forecast(m, rv)[:-1]
+    return f, m.coef
 
 
 def dm_stat(loss_a, loss_b, lags=5):
@@ -151,7 +151,7 @@ def control(seed=33):
     rows = eg.scan(r, specs=(spec, eg.Spec("nelson", 1, 1, "normal"), eg.Spec("garch", 1, 1, "normal"),
                              eg.Spec("garch", 1, 1, "t"), eg.Spec("beta-t")),
                    split=N_TRAIN, targets={"true variance": s2}, se=False, n_random=1)
-    say(f"[control: EGARCH(1,1)-t data, nu = 7] BIC and out-of-sample QLIKE against the true conditional variance:")
+    say("[control: EGARCH(1,1)-t data, nu = 7] BIC and out-of-sample QLIKE against the true conditional variance:")
     for z in rows:
         say(f"  {z['spec']:22s} BIC {z['bic']:9.1f}  nu {z['nu']:6.1f}  QLIKE {z['oos']['true variance']:.4f}")
     best = min(rows, key=lambda z: z["oos"]["true variance"])

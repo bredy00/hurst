@@ -299,5 +299,53 @@
    3
   ],
   "cost_weight": 1.0
+ },
+ "D": {
+  "hmc": 0.30496629030518735,
+  "rows": [
+   {
+    "step": "fitted-Q, argmax (Session M)",
+    "sd": 0.3542820378197662
+   },
+   {
+    "step": "quadratic-Q, at the vertex",
+    "sd": 0.35407407261815943
+   },
+   {
+    "step": "known-reward regression (BS mark, pooled)",
+    "sd": 0.3275674177067843
+   },
+   {
+    "step": "...with a martingale mark",
+    "sd": 0.3091404268960717
+   },
+   {
+    "step": "...one coefficient per date",
+    "sd": 0.3067566352213822
+   },
+   {
+    "step": "...on Hedged Monte Carlo's basis",
+    "sd": 0.30481246687393926
+   }
+  ],
+  "gap": 0.049315747514578845,
+  "other_order": [
+   {
+    "step": "fitted-Q, argmax, martingale mark",
+    "sd": 0.3324280209422643
+   },
+   {
+    "step": "quadratic-Q, vertex, martingale mark",
+    "sd": 0.3306616733672954
+   }
+  ],
+  "mark_alone": 0.4431447961128713,
+  "known_alone": 0.5417056712986947,
+  "both": 0.9153589512224191,
+  "quadratic_q_info": {
+   "sweeps": 1.0,
+   "concave_share": 1.0,
+   "condition": 84897.98023955144
+  }
  }
 }

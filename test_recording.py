@@ -291,6 +291,12 @@ def test_pipeline_synthetic():
     check("the history filter recovers the planted H = 0.10 within 2 measured sd (0.079)",
           abs(fp["H"] - truth.H) < 2 * 0.079,
           f"H {fp['H']:.3f} (profile se {fp['se']:.3f})  ({time.perf_counter()-t0:.0f}s)")
+    # Session N: the error bar the report states is the robust one, and on this estimator it
+    # is wider than the curvature's -- over 21 seeds it was wider on every interior one, the
+    # curvature covering the truth 47% of the time and the robust SE 89%
+    check("the report states the robust SE on H, wider than the curvature's",
+          fp["se"] == fp["se_robust"] and fp["se_robust"] > fp["se_curvature"],
+          f"robust {fp['se_robust']:.3f} against curvature {fp['se_curvature']:.3f}")
     check("report.json, report.md and figure.png are written", wrote)
 
 

@@ -20,6 +20,8 @@ import time
 
 import numpy as np
 
+import filters.kalman as kf
+
 import filters.fourier as ff
 import filters.protocol as proto
 import models.rough_heston as rh
@@ -127,12 +129,49 @@ def test_rv_filter_and_protocol():
           c.get("confirmed", False), f"{c.get('checks')} ({time.perf_counter() - t0:.0f}s)")
 
 
+def test_robust_se():
+    """
+    Session N: the sandwich SE for the profile maximiser, checked where its answer is exact --
+    a Gaussian location model, l_t(H) = -(x_t - H)^2 / 2, whose curvature is T whatever the
+    data. With unit-variance data the model is right and the sandwich must equal the curvature
+    SE; with variance 4 the model is wrong by a factor of 2 in scale and the sandwich must say
+    so, while the curvature SE cannot.
+    """
+    print("\nThe robust (sandwich) SE of the profile maximiser, where it is exact")
+    rng = np.random.default_rng(7)
+    grid = np.array([-0.1, 0.0, 0.1])
+    for sd, want in ((1.0, 1.0), (2.0, 2.0)):
+        x = sd * rng.standard_normal(20000)
+        runs = [{"loglik_t": -0.5 * (x - h) ** 2} for h in grid]
+        H_hat = float(x.mean())
+        d = kf.robust_profile_se(grid, runs, 1, H_hat, lag=0)
+        check(f"data sd {sd}: the sandwich reads {want:.0f}x the curvature SE",
+              abs(d["ratio"] - want) < 0.05 * want,
+              f"ratio {d['ratio']:.3f}; curvature SE {d['se_curvature']:.5f}, robust {d['se']:.5f}")
+    # serial correlation: an AR(1) with rho 0.6 has long-run variance (1+rho)/(1-rho) = 4 times
+    # its variance, so Newey-West must widen the error where the plain sum of squares would not
+    e = np.zeros(20000)
+    for t in range(1, len(e)):
+        e[t] = 0.6 * e[t - 1] + rng.standard_normal() * np.sqrt(1 - 0.36)
+    runs = [{"loglik_t": -0.5 * (e - h) ** 2} for h in grid]
+    d0 = kf.robust_profile_se(grid, runs, 1, float(e.mean()), lag=0)
+    d1 = kf.robust_profile_se(grid, runs, 1, float(e.mean()), lag=40)
+    check("serially correlated scores: Newey-West widens the error towards the long-run variance",
+          d1["se"] > 1.7 * d0["se"], f"lag 0: {d0['se']:.5f}, lag 40: {d1['se']:.5f} "
+                                     f"(sqrt((1 + 0.6)/(1 - 0.6)) = 2)")
+    check("a maximiser on the grid's edge returns nothing rather than an extrapolated error",
+          kf.robust_profile_se(grid, runs, 0, -0.1) == {})
+    check("the automatic Newey-West lag agrees with falsify's rule", kf.newey_west_lag(500) == 5
+          and kf.newey_west_lag(1008) == 6, f"500 -> {kf.newey_west_lag(500)}, 1008 -> {kf.newey_west_lag(1008)}")
+
+
 if __name__ == "__main__":
     print("=" * 74)
     print("Session I -- zero-boundary filtering protocol")
     print("=" * 74)
     t0 = time.perf_counter()
     test_transform()
+    test_robust_se()
     test_panels()
     test_rv_filter_and_protocol()
     print("\n" + "=" * 74)

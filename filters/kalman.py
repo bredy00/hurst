@@ -355,8 +355,64 @@ def profile_h(y, H_grid, p, dt, v0, N=None, names=None, model_cls=None):
             return float(H_grid[i0])
         return float(np.interp(cut, sorted([ll[i0], ll[i1]]),
                                [H_grid[i1], H_grid[i0]] if ll[i1] < ll[i0] else [H_grid[i0], H_grid[i1]]))
+    se_rob = robust_profile_se(H_grid, runs, j, H_hat) if np.isfinite(se) else {}
     return {"H": H_grid, "loglik": ll, "H_hat": H_hat, "se_quadratic": se,
+            "se_robust": se_rob.get("se", float("nan")), "se_robust_detail": se_rob,
             "ci95": (cross(lo_i, lo_i - 1), cross(hi_i, hi_i + 1)), "runs": runs, "params": fitted}
+
+
+def newey_west_lag(n):
+    """floor(4 (n/100)^(2/9)), the automatic rule (and falsify's, so the two projects agree)."""
+    return int(math.floor(4.0 * (n / 100.0) ** (2.0 / 9.0)))
+
+
+def robust_profile_se(H_grid, runs, j, H_hat, lag=None):
+    """
+    A sandwich standard error for the profile maximiser, from each day's own contribution.
+
+    `se_quadratic` is 1/sqrt(I), I the curvature of the profile at its maximum. That is the
+    right error bar only if the filter's likelihood is the TRUE likelihood of the data --
+    and it is not: the Kalman filter for realised variance is a Gaussian quasi-likelihood for
+    a process that is neither Gaussian nor linear. Over 21 synthetic histories of 500 days
+    (Session L) the estimate's spread was 0.079 against a median reported SE of 0.028, the
+    curvature understating it about threefold.
+
+    The quasi-likelihood correction is the sandwich I^{-1} J I^{-1}, J the long-run variance
+    of the per-day scores. Each grid run carries its per-day log-likelihood (`loglik_t`, the
+    filters report it since Session M), so the score of day t at H_hat is the derivative of
+    the same three-point quadratic the maximiser uses, fitted to that day's contributions
+    alone. J is their Newey-West long-run variance (Bartlett weights, `lag` defaulting to the
+    automatic rule), because the scores of a long-memory process are serially correlated and
+    the plain sum of squares would repeat the understatement it is here to remove.
+
+    Under correct specification J = I and this reduces to se_quadratic; the ratio between the
+    two is reported, because it is itself the diagnostic -- how far the filter's model is from
+    the data's. Returns {} when a run lacks per-day contributions.
+    """
+    if not 0 < j < len(H_grid) - 1:
+        return {}
+    idx = [j - 1, j, j + 1]
+    if any(runs[i].get("loglik_t") is None for i in idx):
+        return {}
+    L = np.vstack([np.asarray(runs[i]["loglik_t"], float) for i in idx])       # (3, T)
+    Hs = np.asarray(H_grid, float)[idx]
+    V = np.vander(Hs, 3)                                                       # [H^2, H, 1]
+    coef = np.linalg.solve(V, L)                                               # (3, T): a_t, b_t, c_t
+    a_t, b_t = coef[0], coef[1]
+    score = 2.0 * a_t * H_hat + b_t                                            # d l_t / dH at H_hat
+    info = -2.0 * float(a_t.sum())                                             # the profile's curvature
+    if info <= 0:
+        return {}
+    T = score.size
+    s = score - score.mean()
+    L_nw = newey_west_lag(T) if lag is None else int(lag)
+    J = float(s @ s)
+    for k in range(1, min(L_nw, T - 1) + 1):
+        J += 2.0 * (1.0 - k / (L_nw + 1.0)) * float(s[k:] @ s[:-k])
+    J = max(J, 0.0)
+    se = math.sqrt(J) / info
+    return {"se": se, "se_curvature": 1.0 / math.sqrt(info), "ratio": se * math.sqrt(info),
+            "J": J, "I": info, "lag": L_nw, "n": T}
 
 
 def filter_bank(runs, labels, forget=0.0, prior=None):

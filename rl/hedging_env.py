@@ -74,7 +74,23 @@ def phi_features(S, sigma, tau, K):
     return np.column_stack([np.ones_like(m), delta, pdf * math.sqrt(max(float(tau), 1e-12)), m, m * m])
 
 
-def build_batch(paths, K, every, n_actions=21, seed=0, policy="grid-uniform"):
+def hmc_mark(fit, paths, K):
+    """
+    The option's value at each rebalancing date as Hedged Monte Carlo fitted it, C_k(z) =
+    psi(z) . a_k, with the payoff at expiry: a MARTINGALE-CONSISTENT mark, built by backward
+    regression on realised future cash flows (Session N). Pass as `mark=` to `build_batch`.
+    """
+    n = len(paths["t"]) - 1
+
+    def mark(k):
+        if k >= n or paths["tau"][k] <= 1e-12:
+            return np.maximum(paths["S"][k] - K, 0.0)
+        psi, _, _ = hd._features(paths["S"][k], hd.model_sigma(paths, k), paths["tau"][k], K)
+        return psi @ fit["coefs"][k][0]
+    return mark
+
+
+def build_batch(paths, K, every, n_actions=21, seed=0, policy="grid-uniform", mark=None):
     """
     Log one transition per path per rebalancing date, under a fixed logging policy.
 
@@ -97,11 +113,20 @@ def build_batch(paths, K, every, n_actions=21, seed=0, policy="grid-uniform"):
     grid = action_grid(n_actions)
     n_paths = S.shape[1]
 
-    def mark(k):
+    def bs_mark(k):
         tau = paths["tau"][k]
         if tau <= 1e-12:
             return np.maximum(S[k] - K, 0.0)
         return hd.bs_call(S[k], K, hd.model_sigma(paths, k), tau)
+
+    # The mark is the thing the one-step reward differences. The default is Black-Scholes at
+    # sigma_hat, which is NOT a martingale under the rough model -- and then minimising each
+    # step's squared error is not minimising the variance of the total hedging error, because
+    # the steps are serially correlated. Session N measured what that costs: with `hmc_mark`
+    # (a martingale-consistent value) the same fitted-Q agent goes from 0.354 of the price to
+    # 0.332, 44% of its gap to Hedged Monte Carlo's 0.305. Most of the rest is the agent
+    # learning a reward whose form is known (`known_reward_fit`; study_rl.py section D).
+    mark = mark or bs_mark
 
     phi_l, act_l, rew_l, phin_l, abs_l, ep_l, st_l = [], [], [], [], [], [], []
     for j, k in enumerate(dates):
@@ -192,3 +217,72 @@ def markov_inputs(batch, paths, K, every):
     lags = np.hstack([f_prev, act_prev])
     tgt = np.column_stack([batch.phi_next[rows, 1], batch.phi_next[rows, 3], batch.reward[rows]])
     return feats, lags, tgt, ["next delta", "next moneyness", "reward"]
+
+
+def known_reward_fit(paths, K, every, mark=None, basis="phi", pooled=True):
+    """
+    The hedge fitted as a REGRESSION, using the fact that the reward's dependence on the
+    action is known exactly (Session N).
+
+    The one-step reward is -(dC - a dS)^2: a known function of observed quantities, not a
+    black box in a. So the risk-minimising a(s) is the least-squares coefficient of dC on
+    dS given the state -- fit dC ~ (basis(s) . beta) dS on the logged transitions, and hedge
+    with a(s) = basis(s) . beta. No action is ever tried: every transition informs the fit
+    whichever action the logging policy took, because the action does not enter it.
+
+    This is what Q-learning cannot do. It treats r(s, a) as an unknown function and must
+    learn how it varies with a -- even `QuadraticQ`, which knows the shape, has to model
+    E[dS^2 | s] and E[dC dS | s] as functions of the state, and they scale with S^2 V, which
+    a linear basis in the state does not span. The regression uses the realised dS as its
+    regressor and never models either. Session N measured the difference at 54% of the whole
+    gap to Hedged Monte Carlo.
+
+    mark    "bs" (Black-Scholes at sigma_hat, the default everywhere else) or a callable
+            mark(k) on these paths, e.g. `hmc_mark(fit, paths, K)`
+    basis   "phi" (this module's state features) or "chi" (Hedged Monte Carlo's hedge basis)
+    pooled  one coefficient vector for every date, or one per date as Hedged Monte Carlo has
+
+    With mark = hmc_mark, basis = "chi", pooled = False this reproduces Hedged Monte Carlo's
+    residual to 0.0002 -- the regression IS the analytic hedge, arrived at from the RL side.
+    Returns a rule(paths, k) -> hedge ratios, for `score_rule`.
+    """
+    rl.require_enabled("the known-reward regression")
+    S, n = paths["S"], len(paths["t"]) - 1
+    dates = list(range(0, n, every))
+
+    def bs_mark(k):
+        tau = paths["tau"][k]
+        if tau <= 1e-12:
+            return np.maximum(S[k] - K, 0.0)
+        return hd.bs_call(S[k], K, hd.model_sigma(paths, k), tau)
+
+    mk = bs_mark if mark in (None, "bs") else mark
+
+    def B(p, k):
+        s_, sig, tau = p["S"][k], hd.model_sigma(p, k), p["tau"][k]
+        return phi_features(s_, sig, tau, K) if basis == "phi" else hd._features(s_, sig, tau, K)[1]
+
+    Xs, ys, per = [], [], {}
+    for k in dates:
+        k2 = min(k + every, n)
+        dS = S[k2] - S[k]
+        X, y = B(paths, k) * dS[:, None], mk(k2) - mk(k)
+        if pooled:
+            Xs.append(X)
+            ys.append(y)
+        else:
+            per[k] = np.linalg.lstsq(X, y, rcond=None)[0]
+    if pooled:
+        beta = np.linalg.lstsq(np.vstack(Xs), np.concatenate(ys), rcond=None)[0]
+        return lambda p, k: B(p, k) @ beta
+    return lambda p, k: B(p, k) @ per[k]
+
+
+def score_rule(paths, K, every, rule, premium):
+    """Terminal hedging error of rule(paths, k) -> hedge ratios, with apply_policy's accounting."""
+    S, n = paths["S"], len(paths["t"]) - 1
+    gains = np.zeros(S.shape[1])
+    for k in range(0, n, every):
+        k2 = min(k + every, n)
+        gains += rule(paths, k) * (S[k2] - S[k])
+    return premium + gains - np.maximum(S[n] - K, 0.0)

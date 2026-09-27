@@ -258,3 +258,94 @@ class TabularQ:
 
     def policy(self, phi):
         return greedy(self.q(phi))
+
+
+@rl.register_agent("quadratic-q")
+class QuadraticQ:
+    """
+    Q(s, a) = w0(s) + w1(s) a + w2(s) a^2, each w_i linear in the state features -- the agent
+    that knows the reward is quadratic in the action (Session N).
+
+    Session M blamed the argmax for the gap to Hedged Monte Carlo: the reward -(dC - a dS)^2
+    is a parabola in the hedge ratio a, and an argmax over separately fitted arms compares
+    noisy neighbours instead of locating the vertex. This agent fits ONE regression across
+    every action, r ~ [phi, phi a, phi a^2], so all the data informs every coefficient, and
+    acts at the vertex
+
+        a*(s) = -w1(s) / (2 w2(s)),   clipped to the action range,
+
+    a continuous hedge ratio with no grid at all -- the direct test of that diagnosis.
+
+    It FAILED the diagnosis: the vertex scores 0.3541 against the argmax's 0.3543, 0.4% of
+    the gap. The argmax was never the problem. The gap is attributed in study_rl.py section D:
+    53.7% is learning the reward as a black box (a regression of dC on basis * dS, which is
+    what `rl.hedging_env.known_reward_fit` does, never has to model E[dS^2 | s]), and 37.4%
+    is the Black-Scholes mark, which is not a martingale under the simulated model. The agent
+    stays because it is the right tool whenever a reward IS quadratic in the action and has
+    to be learned: it recovers a planted vertex between grid points (test_rl.py).
+
+    `action_values` are the numeric actions the batch's indices refer to (the hedge-ratio
+    grid). `gamma` is 0 by default because the problems here are bandits; with gamma > 0 the
+    bootstrap maximises the next state's parabola analytically too.
+    """
+
+    def __init__(self, action_values, gamma=0.0, sweeps=1, ridge=1e-8, clip=True):
+        self.values = np.asarray(action_values, float)
+        self.gamma, self.sweeps, self.ridge, self.clip = float(gamma), int(sweeps), float(ridge), bool(clip)
+        self.W = None
+        self.info = {}
+
+    def _design(self, phi, a):
+        a = np.asarray(a, float)[:, None]
+        return np.hstack([phi, phi * a, phi * a * a])
+
+    def _coef(self, phi):
+        k = phi.shape[1]
+        w = phi @ self.W.reshape(3, k).T                    # (n, 3): w0, w1, w2 per state
+        return w[:, 0], w[:, 1], w[:, 2]
+
+    def vertex(self, phi):
+        """The continuous argmax, clipped to the action range. Where the fitted parabola opens
+        upward (w2 >= 0: no interior maximum), the better end of the range is taken."""
+        phi = self._sc(np.atleast_2d(np.asarray(phi, float)))
+        _, w1, w2 = self._coef(phi)
+        lo, hi = float(self.values.min()), float(self.values.max())
+        with np.errstate(divide="ignore", invalid="ignore"):
+            a = np.where(w2 < 0, -w1 / (2.0 * w2), np.nan)
+        ends = np.where(w1 * (hi - lo) + w2 * (hi * hi - lo * lo) >= 0, hi, lo)
+        a = np.where(np.isfinite(a), a, ends)
+        return np.clip(a, lo, hi) if self.clip else a
+
+    def fit(self, batch):
+        rl.require_enabled("the quadratic-Q agent")
+        self._sc = _Scaler().fit(batch.phi)
+        phi, phi_next = self._sc(batch.phi), self._sc(batch.phi_next)
+        a = self.values[batch.action]
+        X = self._design(phi, a)
+        target = batch.reward.copy()
+        live = ~batch.absorbing
+        self.W = np.zeros(X.shape[1])
+        for sweep in range(1, self.sweeps + 1):
+            if self.gamma > 0 and sweep > 1:
+                w0, w1, w2 = self._coef(phi_next)
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    a_n = np.clip(np.where(w2 < 0, -w1 / (2 * w2), self.values.max()),
+                                  self.values.min(), self.values.max())
+                qn = w0 + w1 * a_n + w2 * a_n * a_n
+                target = batch.reward + np.where(live, self.gamma * qn, 0.0)
+            A = X.T @ X + self.ridge * np.eye(X.shape[1])
+            self.W = np.linalg.solve(A, X.T @ target)
+        _, _, w2 = self._coef(phi)
+        self.info.update(sweeps=self.sweeps, concave_share=float(np.mean(w2 < 0)),
+                         condition=float(np.linalg.cond(X.T @ X)))
+        return self
+
+    def q(self, phi):
+        phi = self._sc(np.atleast_2d(np.asarray(phi, float)))
+        w0, w1, w2 = self._coef(phi)
+        v = self.values[None, :]
+        return w0[:, None] + w1[:, None] * v + w2[:, None] * v * v
+
+    def policy(self, phi):
+        """Grid argmax, for the discrete interface; `vertex` is the continuous policy."""
+        return greedy(self.q(phi))

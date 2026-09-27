@@ -143,7 +143,7 @@ def test_agents():
         Qh = model.q(eye)
         err = float(np.max(np.abs(Qh[:4] - Q[:4])))
         check(f"{name} recovers the exact Q on the live states (1e-8)", err < 1e-8, f"{err:.1e}")
-        check(f"...and the exact policy", np.array_equal(mdp.greedy(Qh)[:4], pi[:4]))
+        check("...and the exact policy", np.array_equal(mdp.greedy(Qh)[:4], pi[:4]))
     check("an unfitted agent's weights are not silently zero-valued",
           ag.FittedQ().W is None)
 
@@ -316,6 +316,51 @@ def test_registry():
     rl.AGENTS.pop("test-constant", None)
 
 
+def test_session_n():
+    print("\nSession N: the vertex, the known-reward regression, and the decomposition")
+    rl.enable()                                  # runnable alone: pytest test_rl.py -k session_n
+    rng = np.random.default_rng(11)
+    n, grid = 20000, np.linspace(0.0, 1.0, 11)
+    # a reward that is exactly quadratic in the action, with a state-dependent vertex
+    x = rng.uniform(-1, 1, n)
+    phi = np.column_stack([np.ones(n), x])
+    vertex = 0.5 + 0.3 * x                                    # inside [0, 1]
+    a_idx = rng.integers(0, len(grid), n)
+    r = -(grid[a_idx] - vertex) ** 2 + 0.01 * rng.standard_normal(n)
+    b = ag.Batch(phi, a_idx, r, phi, np.ones(n, bool), len(grid))
+    qq = ag.QuadraticQ(grid).fit(b)
+    v = qq.vertex(phi)
+    check("quadratic-Q recovers a planted vertex between the grid's points",
+          float(np.max(np.abs(v - vertex))) < 0.02, f"worst |a* - vertex| {np.max(np.abs(v - vertex)):.4f}; "
+                                                   f"the grid step is {grid[1] - grid[0]:.2f}")
+    check("...and its parabola opens downward everywhere", qq.info["concave_share"] == 1.0)
+    check("...and it is registered", "quadratic-q" in rl.AGENTS)
+
+    import models.hedging as hd
+    import models.rough_heston as rh
+    import rl.hedging_env as he
+    P = rh.RoughHestonParams(0.04, 2.0, 0.04, 0.3, -0.7, 0.12)
+    tr = hd.simulate_paths(P, 1 / 12, 64, 6000, seed=1)
+    te = hd.simulate_paths(P, 1 / 12, 64, 6000, seed=2)
+    price = 0.0216
+    fit = hd.hmc_fit(tr, 1.0, 4)
+    hmc = hd.hedge_error(te, 1.0, 4, price, "hmc", fit=fit).std() / price
+    rule = he.known_reward_fit(tr, 1.0, 4, mark=he.hmc_mark(fit, tr, 1.0), basis="chi", pooled=False)
+    kr = he.score_rule(te, 1.0, 4, rule, price).std() / price
+    check("the known-reward regression with HMC's mark, basis and dates IS Hedged Monte Carlo (1%)",
+          abs(kr / hmc - 1) < 0.01, f"{kr:.4f} against {hmc:.4f}")
+    bs_rule = he.known_reward_fit(tr, 1.0, 4)
+    kb = he.score_rule(te, 1.0, 4, bs_rule, price).std() / price
+    check("...and with the Black-Scholes mark it cannot be: the mark is not a martingale",
+          kb > kr * 1.02, f"{kb:.4f} with the BS mark against {kr:.4f}")
+    # the mark changes only the reward: the logged states and actions are identical
+    b1, g1, _ = he.build_batch(tr, 1.0, 4, n_actions=11, seed=0)
+    b2, g2, _ = he.build_batch(tr, 1.0, 4, n_actions=11, seed=0, mark=he.hmc_mark(fit, tr, 1.0))
+    check("swapping the mark changes the rewards and nothing else in the batch",
+          np.array_equal(b1.phi, b2.phi) and np.array_equal(b1.action, b2.action)
+          and not np.array_equal(b1.reward, b2.reward))
+
+
 if __name__ == "__main__":
     print("=" * 74)
     print("Session M -- the reinforcement-learning framework")
@@ -327,6 +372,7 @@ if __name__ == "__main__":
     test_hedging_env()
     test_filter_env()
     test_registry()
+    test_session_n()
     print("\n" + "=" * 74)
     print(f"{len(PASS)} passed, {len(FAIL)} failed")
     for f in FAIL:

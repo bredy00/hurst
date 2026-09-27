@@ -14,6 +14,9 @@ because both problems it is pointed at have a known optimum:
   H  hedging. The agents against the Black-Scholes delta, against that delta snapped to the
      agents' own action grid (their real floor), and against Hedged Monte Carlo -- which
      solves this exact problem analytically by backward regression (Sessions J-K).
+  D  where that gap comes from (Session N), attributed one change at a time. It is NOT the
+     argmax, which Session M blamed: an agent acting at the quadratic's vertex scores the
+     same. It is treating a known reward as a black box, and a mark that is not a martingale.
   F  filter selection at the zero boundary, learned offline from logged filter runs, against
      the written protocol of Session I and against the converged 64-substep particle filter.
   C  what the framework costs, beside the analytic machinery it sits next to.
@@ -180,6 +183,70 @@ def section_h(tr, te, batch, grid, dates, price):
     say(f"   mean |RL - HMC| {out['hmc_vs_rl_mean_abs']:.4f}, mean |RL - BS| {out['bs_vs_rl_mean_abs']:.4f} "
         f"(the grid's own step is {1 / (len(grid) - 1):.3f})")
     return out
+
+
+def section_d(tr, te, price):
+    """
+    Session N: where the gap to Hedged Monte Carlo actually comes from.
+
+    Session M blamed the argmax. The direct test -- an agent that knows the reward is
+    quadratic in the action and acts at the vertex -- scored the same as the argmax agent,
+    so that diagnosis was wrong. This section attributes the whole gap, one change at a time:
+    the vertex instead of the argmax; a regression that uses the reward's KNOWN form instead
+    of learning it; a martingale mark instead of Black-Scholes; one coefficient per date
+    instead of pooled; Hedged Monte Carlo's own basis instead of this module's.
+    """
+    fit = hd.hmc_fit(tr, K_STRIKE, EVERY)
+    hmc = float(hd.hedge_error(te, K_STRIKE, EVERY, price, "hmc", fit=fit).std() / price)
+    b, grid, _ = he.build_batch(tr, K_STRIKE, EVERY, n_actions=N_ACTIONS, seed=0)
+    fq = ag.FittedQ(sweeps=1, gamma=0.0).fit(b)
+    qq = ag.QuadraticQ(grid).fit(b)
+    steps = [("fitted-Q, argmax (Session M)",
+              he.apply_policy(te, K_STRIKE, EVERY, he.agent_policy(fq, grid), price)),
+             ("quadratic-Q, at the vertex",
+              he.apply_policy(te, K_STRIKE, EVERY, lambda f, k: qq.vertex(f), price))]
+    hmark = he.hmc_mark(fit, tr, K_STRIKE)
+    for label, mk, basis, pooled in (
+            ("known-reward regression (BS mark, pooled)", None, "phi", True),
+            ("...with a martingale mark", hmark, "phi", True),
+            ("...one coefficient per date", hmark, "phi", False),
+            ("...on Hedged Monte Carlo's basis", hmark, "chi", False)):
+        rule = he.known_reward_fit(tr, K_STRIKE, EVERY, mark=mk, basis=basis, pooled=pooled)
+        steps.append((label, he.score_rule(te, K_STRIKE, EVERY, rule, price)))
+    rows = [{"step": lab, "sd": float(e.std() / price)} for lab, e in steps]
+    gap = rows[0]["sd"] - hmc
+    say(f"D  the gap to Hedged Monte Carlo ({hmc:.4f}), attributed one change at a time:")
+    prev = None
+    for r in rows:
+        share = "" if prev is None else f"   closes {100 * (prev - r['sd']) / gap:5.1f}% of the gap"
+        say(f"     {r['step']:44s} {r['sd']:.4f}{share}")
+        prev = r["sd"]
+    say(f"     {'Hedged Monte Carlo':44s} {hmc:.4f}   (the last row reproduces it to "
+        f"{abs(rows[-1]['sd'] - hmc):.4f})")
+    # A chain splits the gap in ONE order. The other order -- the martingale mark handed to the
+    # agents themselves, with the reward still learned -- checks that the split is not an
+    # artefact of it: if the two effects are additive, mark-alone plus known-reward-alone
+    # matches the two together.
+    bm, _, _ = he.build_batch(tr, K_STRIKE, EVERY, n_actions=N_ACTIONS, seed=0, mark=hmark)
+    fq_m = ag.FittedQ(sweeps=1, gamma=0.0).fit(bm)
+    qq_m = ag.QuadraticQ(grid).fit(bm)
+    other = [{"step": lab, "sd": float(e.std() / price)} for lab, e in (
+        ("fitted-Q, argmax, martingale mark",
+         he.apply_policy(te, K_STRIKE, EVERY, he.agent_policy(fq_m, grid), price)),
+        ("quadratic-Q, vertex, martingale mark",
+         he.apply_policy(te, K_STRIKE, EVERY, lambda f, k: qq_m.vertex(f), price)))]
+    say("   the other order -- the martingale mark given to the agents, the reward still learned:")
+    for r in other:
+        say(f"     {r['step']:44s} {r['sd']:.4f}   closes {100 * (rows[0]['sd'] - r['sd']) / gap:5.1f}% of the gap")
+    mark_alone = (rows[0]["sd"] - other[0]["sd"]) / gap
+    known_alone = (rows[0]["sd"] - rows[2]["sd"]) / gap
+    both = (rows[0]["sd"] - rows[3]["sd"]) / gap
+    say(f"   the mark alone {100 * mark_alone:.1f}%, the known reward alone {100 * known_alone:.1f}%, "
+        f"both {100 * both:.1f}%: additive to within {100 * abs(mark_alone + known_alone - both):.1f}% "
+        f"of the gap")
+    return {"hmc": hmc, "rows": rows, "gap": gap, "other_order": other,
+            "mark_alone": mark_alone, "known_alone": known_alone, "both": both,
+            "quadratic_q_info": {k: float(v) for k, v in qq.info.items()}}
 
 
 def section_h_scaling(te, price):
@@ -357,12 +424,12 @@ def plot(res):
 
 def main(argv):
     rl.enable()
-    want = [a.upper() for a in argv] or ["A", "M", "H", "C"]
+    want = [a.upper() for a in argv] or ["A", "M", "H", "D", "C"]
     if want == ["ALL"]:
-        want = ["A", "M", "H", "C", "F"]
+        want = ["A", "M", "H", "D", "C", "F"]
     res = json.loads(OUT.read_text(encoding="utf-8")) if OUT.exists() else {}
     t0 = time.perf_counter()
-    need_hedging = {"M", "H", "C"} & set(want)
+    need_hedging = {"M", "H", "D", "C"} & set(want)
     if need_hedging:
         say(f"   building the hedging batch ({N_TRAIN} training paths)...")
         tr, te, batch, grid, dates, price = hedging_data()
@@ -373,6 +440,8 @@ def main(argv):
     if "H" in want:
         res["H"] = section_h(tr, te, batch, grid, dates, price)
         res["H2"] = section_h_scaling(te, price)
+    if "D" in want:
+        res["D"] = section_d(tr, te, price)
     if "C" in want:
         res["C"] = section_c(batch)
     if "F" in want:
