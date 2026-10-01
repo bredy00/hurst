@@ -3,21 +3,21 @@
   {
    "group": "Engineering",
    "name": "CPU reference workload",
-   "measured": 1.6304194999393076,
+   "measured": 0.3903167999815196,
    "threshold": Infinity,
    "ok": true,
    "unit": "s",
-   "note": "best of 3; 7.05x the fastest of this machine's last 10 runs -- THROTTLED",
+   "note": "best of 3; 1.69x the fastest of this machine's last 12 runs -- THROTTLED",
    "trend": true
   },
   {
    "group": "Markovian lift",
    "name": "rough objective evaluation, 10 expiries x 13 strikes",
-   "measured": 2.2217843000544235,
+   "measured": 0.6907957999501377,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
-   "note": "best of 3 (all: 2.22, 2.28, 2.37); trend target: rolling mean <= 0.75 s; THROTTLED 7.05x: judged at 0.32 s, not added to the trend",
+   "note": "best of 3 (all: 0.71, 0.69, 0.69); trend target: rolling mean <= 0.75 s; THROTTLED 1.69x: judged at 0.41 s, not added to the trend",
    "trend": false
   },
   {
@@ -417,7 +417,7 @@
    "threshold": 0.01,
    "ok": true,
    "unit": "rel",
-   "note": "7 iters, 1.9s",
+   "note": "7 iters, 0.6s",
    "trend": true
   },
   {
@@ -1311,6 +1311,46 @@
    "trend": false
   },
   {
+   "group": "Session O: readings, eSSVI, transaction costs",
+   "name": "tempered bank widens by the sandwich ratio (want 2)",
+   "measured": 0.0007287591137687954,
+   "threshold": 0.05,
+   "ok": true,
+   "unit": "",
+   "note": "ratio 1.999; data sd 2 against a unit-variance model",
+   "trend": true
+  },
+  {
+   "group": "Session O: readings, eSSVI, transaction costs",
+   "name": "eSSVI recovers a planted surface (worst relative error)",
+   "measured": 1.013231007389001e-05,
+   "threshold": 0.001,
+   "ok": true,
+   "unit": "",
+   "note": "three slices, every candidate inside the no-arbitrage set",
+   "trend": true
+  },
+  {
+   "group": "Session O: readings, eSSVI, transaction costs",
+   "name": "crossing pairs the cheap conditions miss, waved through",
+   "measured": 0.0,
+   "threshold": 0.0,
+   "ok": true,
+   "unit": "",
+   "note": "one crossing near the money, one only between k = 8 and 23",
+   "trend": true
+  },
+  {
+   "group": "Session O: readings, eSSVI, transaction costs",
+   "name": "cost DP: its value against its own policy's score, in SE",
+   "measured": 0.6756361140233259,
+   "threshold": 3.0,
+   "ok": true,
+   "unit": "",
+   "note": "V0 -0.6612, scored -0.6665; 16 dates, 20 bp",
+   "trend": true
+  },
+  {
    "group": "Engineering",
    "name": "scipy modules on the live import path",
    "measured": 0,
@@ -1323,7 +1363,7 @@
   {
    "group": "Engineering",
    "name": "startup to actionable error, no TWS",
-   "measured": 1.829431900056079,
+   "measured": 0.7758843000046909,
    "threshold": 3.0,
    "ok": true,
    "unit": "s",
@@ -1333,7 +1373,7 @@
   {
    "group": "Engineering",
    "name": "calibration objective evaluation",
-   "measured": 48.54615998920053,
+   "measured": 16.95389999076724,
    "threshold": 200.0,
    "ok": true,
    "unit": "ms",
@@ -1371,7 +1411,7 @@
    "trend": true
   }
  ],
- "seconds": 603.3231458000373,
+ "seconds": 196.28067520004697,
  "python": "3.12.3",
  "numpy": "2.5.2"
 }
