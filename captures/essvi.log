@@ -1,0 +1,29 @@
+A  a planted eSSVI surface recovered: worst relative parameter error 3.1e-05, worst fit 8.5e-05 vp; audit {'durrleman_min': 0.2756930144394105, 'worst_crossing': 0.0}
+B  rough Heston at H = 0.10, exact vols, 5 expiries x 11 strikes (+/- 2.5 sd):
+     eSSVI     error vs the true surface 0.037 vp; per slice [0.051, 0.042, 0.038, 0.033, 0.026]; Durrleman min +0.253, worst crossing +0.00e+00 (14s)
+     raw SVI   error vs the true surface 0.005 vp; Durrleman min +0.254, worst crossing +0.00e+00
+   C draw  0: error vs truth eSSVI 0.151 vp, raw SVI 0.170 vp; raw SVI g min +0.186, crossing -3.6e-04
+   C draw  1: error vs truth eSSVI 0.131 vp, raw SVI 0.170 vp; raw SVI g min +0.249, crossing -3.3e-03
+   C draw  2: error vs truth eSSVI 0.120 vp, raw SVI 0.145 vp; raw SVI g min +0.222, crossing -2.1e-03
+   C draw  3: error vs truth eSSVI 0.161 vp, raw SVI 0.196 vp; raw SVI g min -0.002, crossing -2.1e-02
+   C draw  4: error vs truth eSSVI 0.161 vp, raw SVI 0.218 vp; raw SVI g min +0.174, crossing -3.8e-03
+   C draw  5: error vs truth eSSVI 0.124 vp, raw SVI 0.160 vp; raw SVI g min +0.190, crossing -2.3e-03
+   C draw  6: error vs truth eSSVI 0.156 vp, raw SVI 0.194 vp; raw SVI g min +0.071, crossing -8.9e-04
+   C draw  7: error vs truth eSSVI 0.122 vp, raw SVI 0.176 vp; raw SVI g min +0.092, crossing -8.9e-03
+   C draw  8: error vs truth eSSVI 0.123 vp, raw SVI 0.171 vp; raw SVI g min -17754961.065, crossing +0.0e+00
+   C draw  9: error vs truth eSSVI 0.175 vp, raw SVI 0.205 vp; raw SVI g min +0.256, crossing -1.4e-03
+   C draw 10: error vs truth eSSVI 0.153 vp, raw SVI 0.187 vp; raw SVI g min +0.116, crossing -1.3e-02
+   C draw 11: error vs truth eSSVI 0.145 vp, raw SVI 0.192 vp; raw SVI g min +0.085, crossing +0.0e+00
+   C draw 12: error vs truth eSSVI 0.172 vp, raw SVI 0.232 vp; raw SVI g min +0.235, crossing -2.2e-03
+   C draw 13: error vs truth eSSVI 0.177 vp, raw SVI 0.250 vp; raw SVI g min -0.032, crossing -2.5e-02
+   C draw 14: error vs truth eSSVI 0.169 vp, raw SVI 0.180 vp; raw SVI g min +0.247, crossing +0.0e+00
+   C draw 15: error vs truth eSSVI 0.158 vp, raw SVI 0.226 vp; raw SVI g min +0.107, crossing -6.3e-03
+   C draw 16: error vs truth eSSVI 0.123 vp, raw SVI 0.164 vp; raw SVI g min +0.195, crossing -3.1e-03
+   C draw 17: error vs truth eSSVI 0.149 vp, raw SVI 0.177 vp; raw SVI g min +0.228, crossing -3.3e-03
+   C draw 18: error vs truth eSSVI 0.154 vp, raw SVI 0.209 vp; raw SVI g min +0.021, crossing -8.7e-04
+   C draw 19: error vs truth eSSVI 0.153 vp, raw SVI 0.248 vp; raw SVI g min -0.175, crossing -2.2e-01
+C  20 draws of 0.3 vp quote noise: error vs the TRUE surface eSSVI 0.149 vp, raw SVI 0.194 vp (eSSVI closer in 100% of draws)
+   arbitrage on |k| <= 1: raw SVI 90% of surfaces (butterfly 20%, calendar 85%); eSSVI 0%
+
+[done in 364s] -> C:\Projects\volatility-surface-tuning\captures\essvi.json
+exit 0

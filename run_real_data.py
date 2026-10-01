@@ -88,43 +88,134 @@ def chain_checks(app, ctxs):
             "weak_parity": [e for e, v in parity.items() if v["r2"] < 0.99]}
 
 
-def surface_from_snapshot(app, ctxs, scheme="hybrid", max_err=0.05, min_tau_days=0.9, iv_source="mid"):
+DROP_REASONS = (
+    ("duplicate", "a second record of the same contract (the seed pass and the grid overlap)"),
+    ("expiry", "expiry unusable (no forward, or under a day to go)"),
+    ("itm", "in-the-money side (the out-of-the-money quote is used)"),
+    ("crossed", "crossed market (bid above ask)"),
+    ("no_bid", "no bid (zero or missing)"),
+    ("no_ask", "no ask"),
+    ("bounds", "mid outside the no-arbitrage bounds (no implied vol)"),
+    ("wide", "spread too wide for its vega"),
+)
+
+
+def _market_side(q):
+    """Why a quote has no two-sided market, or None when it has one."""
+    bid, ask = q.bid, q.ask
+    if not np.isfinite(ask) or ask <= 0:
+        return "no_ask"
+    if not np.isfinite(bid) or bid <= 0:
+        return "no_bid"
+    if bid > ask:
+        return "crossed"
+    return None
+
+
+def surface_from_snapshot(app, ctxs, scheme="hybrid", max_err=0.05, min_tau_days=0.9, iv_source="mid",
+                          ledger=None):
+    """
+    The recorded chain as a MarketSurface, out-of-the-money quotes only.
+
+    With iv_source="mid" a quote needs a two-sided market (Session O). `Quote.mid` falls back to
+    IBKR's MODEL price when the bid or ask is missing, zero or crossed, and `half_spread` to its
+    half-cent floor -- which is right for a dashboard that has to draw something, and wrong
+    here: such a quote entered the calibration priced by IBKR's own model, with about the
+    tightest error bar a quote can have. `ledger`, a dict, is filled with the count of quotes
+    dropped for each of DROP_REASONS, and per expiry, so a report can say what was left out.
+
+    One record per contract (Session O). The recorder's seed pass quotes a few near-the-money
+    options per expiry to find the forward, and its grid sweep asks for the same strikes again
+    (ids id_base + i and id_base + 1000 + j), so a snapshot holds both: 145 records for 140
+    contracts on the synthetic chain, each duplicate counted twice by the calibration. The
+    later record of a contract is used.
+    """
+    counts = {key: 0 for key, _ in DROP_REASONS}
+    by_exp = {}
+    kept_n = 0
     tau, k, iv, vega, hs, rows = [], [], [], [], [], []
-    for q in app.quotes.values():
+
+    def drop(key, exp):
+        counts[key] += 1
+        by_exp.setdefault(exp, {"kept": 0, **{kk: 0 for kk, _ in DROP_REASONS}})[key] += 1
+
+    latest = {}
+    for rid in sorted(app.quotes):
+        q = app.quotes[rid]
+        key = (q.expiry, q.strike, q.right)
+        if key in latest:
+            drop("duplicate", q.expiry)
+            if q.ts < latest[key].ts:
+                continue
+        latest[key] = q
+    for q in latest.values():
         ctx = ctxs.get(q.expiry)
         if ctx is None or ctx.tau * 365 < min_tau_days or not np.isfinite(ctx.forward):
+            drop("expiry", q.expiry)
             continue
         if q.right != vc.otm_right(q.strike, ctx.forward):
+            drop("itm", q.expiry)
             continue
         if iv_source == "mid":
-            mid = q.mid
-            if not (np.isfinite(mid) and mid > 0):
+            side = _market_side(q)
+            if side is not None:
+                drop(side, q.expiry)
                 continue
+            mid = 0.5 * (q.bid + q.ask)
             sig = vc.implied_vol(mid, ctx.forward, q.strike, ctx.tau, ctx.discount, q.right)
         else:
             sig = q.iv
         if sig is None or not np.isfinite(sig) or sig <= 0:
+            drop("bounds", q.expiry)
             continue
         veg = float(vc.bs_vega(ctx.forward, q.strike, sig, ctx.tau, ctx.discount))
         if veg <= 0 or q.half_spread / veg > max_err:
+            drop("wide", q.expiry)
             continue
+        by_exp.setdefault(q.expiry, {"kept": 0, **{kk: 0 for kk, _ in DROP_REASONS}})["kept"] += 1
+        kept_n += 1
         tau.append(ctx.tau)
         k.append(math.log(q.strike / ctx.forward))
         iv.append(sig)
         vega.append(veg)
         hs.append(q.half_spread)
         rows.append({"expiry": q.expiry, "strike": q.strike, "right": q.right})
+    if ledger is not None:
+        ledger.update({"n_quotes": len(app.quotes), "kept": kept_n, "dropped": counts, "by_expiry": by_exp,
+                       "thin_expiries": sorted(e for e, v in by_exp.items() if 0 < v["kept"] < 5)})
     tau, k, iv, vega, hs = (np.array(a, float) for a in (tau, k, iv, vega, hs))
     w, anchors = wt.scheme_weights(scheme, tau, k, iv, vega, hs)
     return MarketSurface(tau, k, iv, w, anchors=anchors), rows
 
 
-def skew_term_structure(S):
-    """Market ATM skew per expiry (local fit) and H from its log-log slope."""
+def surface_arbitrage(S):
+    """
+    The recorded surface fitted two ways (Session O): raw SVI per expiry, which can cross
+    between expiries and dent within one, and eSSVI (fit/essvi.py), which cannot. Each is
+    audited the same way -- Durrleman's g for butterflies, slice crossings for calendars.
+    """
+    import fit.essvi as es
+    import fit.svi as svi
+    slices = [(t, S.k[idx], S.iv[idx]) for t, idx in S.by_expiry if len(idx) >= 5]
+    if len(slices) < 2:
+        return {"n_slices": len(slices)}
+    t0 = time.perf_counter()
+    ef = es.fit_surface(slices)
+    live = [f for f in ef if not f.get("skipped")]
+    raw = [svi.fit_slice(k, iv ** 2 * t, tau=t) for t, k, iv in slices]
+    return {"n_slices": len(slices), "seconds": time.perf_counter() - t0,
+            "essvi": {"rmse_vp": [f["rmse_vp"] for f in live], "skipped": len(ef) - len(live), "audit": es.audit(ef)},
+            "raw_svi": {"rmse_vp": [es.raw_svi_rmse_vp(f, k, iv, t) for f, (t, k, iv) in zip(raw, slices)],
+                        "audit": es.audit_raw_svi(raw, [t for t, _, _ in slices])}}
+
+
+def skew_term_structure(S, max_tau_days=None):
+    """Market ATM skew per expiry (local fit) and H from its log-log slope, over every expiry
+    or, with `max_tau_days`, over the short end only (Session O)."""
     taus, skews, errs = [], [], []
     for t, idx in S.by_expiry:
         ks, ivs = S.k[idx], S.iv[idx]
-        if len(idx) < 5:
+        if len(idx) < 5 or (max_tau_days is not None and t * 365.0 > max_tau_days + 1e-9):
             continue
         atm = idx[np.argmin(np.abs(ks))]
         z = ks / (S.iv[atm] * math.sqrt(t))
@@ -229,6 +320,10 @@ def analyse_history(data, dt=1.0 / 252, max_days=750, profile_names=("xi",), con
     prof = kf.profile_h(y, H_GRID, p0, dt, theta0, names=profile_names, model_cls=rv_model)
     bank = kf.filter_bank(prof["runs"], H_GRID)
     rob = prof.get("se_robust_detail") or {}
+    # Session O: the bank at full strength inherits the curvature's optimism (95% coverage 43%
+    # over 21 synthetic histories); tempered by the sandwich ratio it covered 95%
+    ratio = rob.get("ratio", float("nan"))
+    bank_t = kf.filter_bank(prof["runs"], H_GRID, temper=1.0 / ratio ** 2) if np.isfinite(ratio) and ratio > 0 else None
     out["rough_profile"] = {"H": list(H_GRID), "loglik_minus_max": (prof["loglik"] - prof["loglik"].max()).tolist(),
                             "H_hat": prof["H_hat"], "se": prof["se_quadratic"], "ci95": prof["ci95"],
                             # the curvature SE assumes the filter's likelihood is the data's; the
@@ -238,6 +333,8 @@ def analyse_history(data, dt=1.0 / 252, max_days=750, profile_names=("xi",), con
                             "se_ratio": rob.get("ratio", float("nan")),
                             "xi_by_H": [q[profile_names[0]] for q in prof["params"]] if profile_names else None,
                             "bank_mean": float(bank["mean"][-1]), "bank_sd": float(bank["sd"][-1]),
+                            "bank_t_mean": float(bank_t["mean"][-1]) if bank_t else float("nan"),
+                            "bank_t_sd": float(bank_t["sd"][-1]) if bank_t else float("nan"),
                             "loglik_vs_cir": float(prof["loglik"].max() - fit["loglik"])}
     out["_series"] = {"dates": dates, "y": y.tolist(), "bank_mean_path": bank["mean"].tolist()}
 
@@ -388,9 +485,12 @@ def run(snapshot=None, history=None, scheme="hybrid", out_dir=None, synthetic=Fa
         print(f"chain: {c['n_quotes']} quotes; vega units ratio {c['vega_ratio_median']:.3f} "
               f"({'ok' if c['vega_units_ok'] else 'CHECK'}); IV(mid, our tau) - IBKR IV median "
               f"{c['iv_mid_minus_ibkr_median_vp']:+.2f} vp; weak parity on {len(c['weak_parity'])} expiries", flush=True)
-        S, rows = surface_from_snapshot(app, ctxs, scheme)
+        quality = {}
+        S, rows = surface_from_snapshot(app, ctxs, scheme, ledger=quality)
         report["chain"]["surface"] = {"quotes": len(S), "expiries": S.n_expiries, "anchors": len(S.anchors),
                                       "effective_quotes": wt.effective_quotes(S.weight)}
+        report["chain"]["quality"] = quality
+        report["chain"]["arbitrage"] = surface_arbitrage(S)
         ts = skew_term_structure(S)
         report["chain"]["skew"] = ts
         if ts.get("H") is not None:
@@ -435,6 +535,8 @@ def run(snapshot=None, history=None, scheme="hybrid", out_dir=None, synthetic=Fa
         se_h = rp_["se_robust"] if np.isfinite(rp_.get("se_robust", float("nan"))) else rp_["se"]
         report["H"]["filter_profile"] = {"H": rp_["H_hat"], "se": se_h, "se_curvature": rp_["se"],
                                          "se_robust": rp_.get("se_robust")}
+        if np.isfinite(rp_.get("bank_t_mean", float("nan"))):
+            report["H"]["filter_bank_tempered"] = {"H": rp_["bank_t_mean"], "se": rp_["bank_t_sd"]}
         report["H"]["structure_function"] = {"H": hs["H_structure"], "se": None}
         print(f"history: {hs['n_days']} days of {hs['source']}; CIR kappa {hs['cir']['params']['kappa']:.1f}; "
               f"filter H {rp_['H_hat']:.3f} (se {se_h:.3f}; curvature {rp_['se']:.3f}; bank "
@@ -459,6 +561,57 @@ def _json_default(o):
 def _f3(x):
     """Three decimals for a number, and the value as it is otherwise (None when not estimated)."""
     return f"{x:.3f}" if isinstance(x, (int, float, np.floating)) and np.isfinite(x) else str(x)
+
+
+def _readings_scorecard(path=None):
+    """
+    One line per reading of H, from study_h_readings.py's grading on synthetic data with a
+    planted H = 0.10 (Session O) -- what each number in the table is worth, measured where the
+    answer is known. Empty when the study has not been run.
+    """
+    path = pathlib.Path(path) if path else ROOT / "captures" / "h_readings.json"
+    try:
+        res = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    a = res.get("A", {})
+    if a.get("exact_law_full") is not None:
+        local = a.get("local_H", {}).get("H") or [float("nan")]
+        out["skew_term_structure"] = (f"not an estimate of H: the model's EXACT skews give {a['exact_law_full']:+.3f} over "
+                                      f"this window for H = 0.10 -- the power law is an asymptote, its local exponent "
+                                      f"{local[0]:+.3f} even at one day")
+        out["skew_term_structure_trading_clock"] = out["skew_term_structure"]
+    g = res.get("scorecard_500", {})
+    if g:
+        p, t, s_ = g["profile"], g.get("bank_tempered", {}), g["structure"]
+        extra = ""
+        by = res.get("by_length", {})
+        if by:
+            longest = max(by, key=int)
+            extra = (f"; the bias does not shrink with more days (+{by[longest]['profile']['bias']:.3f} at {longest})"
+                     if by[longest]["profile"]["bias"] > 0.5 * p["bias"] else "")
+        out["filter_profile"] = (f"mean {p['mean']:.3f}, sd {p['sd']:.3f} over {g['n']} histories of 500 days; robust "
+                                 f"95% covers the truth {100 * p['coverage_robust']:.0f}%, the curvature's "
+                                 f"{100 * p['coverage_curvature']:.0f}%{extra}")
+        if t:
+            out["filter_bank_tempered"] = (f"mean {t['mean']:.3f}; 95% covers {100 * t['coverage']:.0f}% (at full "
+                                           f"strength {100 * g['bank']['coverage']:.0f}%)")
+        out["structure_function"] = (f"mean {s_['mean']:.3f}, sd {s_['sd']:.3f}: the tightest reading here, with no "
+                                     f"error bar of its own")
+    out["rough_calibration"] = "recovers every parameter of an exact rough Heston chain (Session E)"
+    return out
+
+
+def _quality_text(q):
+    """The ledger as one report line: what was kept, what was left out and why (Session O)."""
+    labels = dict(DROP_REASONS)
+    parts = [f"{n} {labels[key]}" for key, n in q["dropped"].items() if n]
+    line = (f"- data quality: {q['kept']} of {q['n_quotes']} recorded quotes used"
+            + (f"; left out: {'; '.join(parts)}" if parts else ""))
+    if q.get("thin_expiries"):
+        line += f"; **expiries with under 5 usable quotes: {', '.join(q['thin_expiries'])}**"
+    return line
 
 
 def _h_error_text(rp):
@@ -490,6 +643,15 @@ def markdown(r):
                   f"- IV from mid under our tau minus IBKR IV: median {c['iv_mid_minus_ibkr_median_vp']:+.2f} vol points",
                   f"- surface: {ch['surface']['quotes']} quotes, {ch['surface']['expiries']} expiries, "
                   f"{ch['surface']['anchors']} skew anchors, {ch['surface']['effective_quotes']:.1f} effective quotes"]
+        if ch.get("quality"):
+            lines.append(_quality_text(ch["quality"]))
+        arb = ch.get("arbitrage", {})
+        if arb.get("essvi"):
+            e, w = arb["essvi"], arb["raw_svi"]
+            lines.append(f"- arbitrage: eSSVI (none by construction) fits {arb['n_slices']} expiries to "
+                         f"{np.mean(e['rmse_vp']):.3f} vp; raw SVI per expiry fits to {np.nanmean(w['rmse_vp']):.3f} vp "
+                         f"and crosses between {w['audit']['crossing_pairs']} pair(s) of expiries on |k| <= 1, "
+                         f"Durrleman g min {w['audit']['durrleman_min']:+.3f}")
         pc = ch.get("clock", {}).get("pooled", {})
         if pc.get("identified"):
             evs = sorted({e for q in pc["per_snapshot"] for e in q["events"]})
@@ -515,7 +677,11 @@ def markdown(r):
                   + (f"(se {hs['cir']['se']['kappa']:.2f})" if np.isfinite(hs['cir']['se']['kappa'])
                      else "(se not available: the numerical Hessian at the optimum gives none)"),
                   f"- lifted rough filter: H profile maximum {rp['H_hat']:.3f} ({_h_error_text(rp)}); "
-                  f"bank posterior {rp['bank_mean']:.3f} +/- {rp['bank_sd']:.3f}; log-likelihood over CIR {rp['loglik_vs_cir']:+.1f}",
+                  + (f"bank posterior tempered by the same ratio {rp['bank_t_mean']:.3f} +/- {rp['bank_t_sd']:.3f} "
+                     f"(at full strength {rp['bank_mean']:.3f} +/- {rp['bank_sd']:.3f}, the curvature's optimism again)"
+                     if np.isfinite(rp.get("bank_t_mean", float("nan"))) else
+                     f"bank posterior {rp['bank_mean']:.3f} +/- {rp['bank_sd']:.3f}")
+                  + f"; log-likelihood over CIR {rp['loglik_vs_cir']:+.1f}",
                   f"- structure function of log RV: H {_f3(hs['H_structure'])} (r2 {_f3(hs['H_structure_r2'])})"]
         zb = hs.get("zero_boundary")
         if zb:
@@ -535,10 +701,14 @@ def markdown(r):
                 line += ")"
             lines.append(line)
         lines.append("")
-    lines += ["## Four readings of H", "", "| estimator | H | se |", "|---|---|---|"]
+    card = _readings_scorecard()
+    n = len(r["H"])
+    lines += [f"## {n} reading{'s' if n != 1 else ''} of H", "",
+              "| estimator | H | se | graded where the answer is known (study_h_readings.py) |", "|---|---|---|---|"]
     for key, v in r["H"].items():
         se = v.get("se")
-        lines.append(f"| {key} | {v['H']:.3f} | {'' if se is None or not np.isfinite(se) else f'{se:.3f}'} |")
+        lines.append(f"| {key} | {_f3(v['H'])} | {'' if se is None or not np.isfinite(se) else f'{se:.3f}'} | "
+                     f"{card.get(key, '')} |")
     if r.get("truth_H") is not None:
         lines += ["", f"Truth (synthetic): H = {r['truth_H']}"]
     return "\n".join(lines) + "\n"

@@ -1,0 +1,22 @@
+A  the skew slope on the synthetic chain (priced exactly by the model; planted H = 0.10)
+   expiries (days)            [1.9, 6.9, 10.9, 31.9, 81.0]
+   chain's ATM skews           [-3.8537, -2.0327, -1.6119, -0.9136, -0.5364]
+   the model's exact skews     [-4.1653, -2.2679, -1.8041, -1.0178, -0.5891]
+   reading, every expiry       H -0.031 (se 0.008)   the exact skews give -0.024
+   reading, <= 16 days         H -0.003 (se 0.001)   the exact skews give +0.018
+   the power law's own exponent between neighbouring maturities (exact skews):
+       1.2d +0.048    1.8d +0.040    2.7d +0.032    4.1d +0.021    6.1d +0.010    9.1d -0.004   13.5d -0.019   20.2d -0.037   30.1d -0.057   44.9d -0.080   67.1d -0.105  100.1d -0.133  149.4d -0.163
+
+B  the history readings over 21 synthetic histories of 500 days (planted H = 0.10; 2 on the grid's edge, left out of the profile's spread)
+   filter profile        mean 0.146  median 0.151  sd 0.075  95% coverage: curvature 47%, robust 89%
+   filter bank           mean 0.134  sd of the means 0.080  reported sd (median) 0.025  95% coverage 43%
+   ...tempered           mean 0.141  sd of the means 0.057  reported sd (median) 0.053  95% coverage 95%
+   structure function    mean 0.126  sd 0.020  (no error bar of its own)
+
+C  the filter profile as the history grows (seeds 3-12 at every length)
+   days   mean   median   sd     bias    robust se   coverage robust / curvature   edge
+    250  0.152  0.133  0.081  +0.052   0.074        90% /  80%                    0
+    500  0.125  0.125  0.040  +0.025   0.057       100% /  78%                    1
+   1000  0.164  0.162  0.029  +0.064   0.045        80% /  20%                    0
+   2000  0.147  0.142  0.025  +0.047   0.032        70% /  20%                    0
+   the bias moves like T^+0.09 (a consistent estimator's finite-sample bias goes like T^-1 or T^-1/2; a flat one does not go)

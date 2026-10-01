@@ -11,6 +11,10 @@ the recorder, before a single real quote had been seen:
   3  a request id reused across cycles lets a late tick corrupt another contract
   4  tau used local wall-clock time as UTC (checked in test_core.py)
 
+and a fifth, found in Session O by reading rather than by a crash: a quote with no two-sided
+market was priced at IBKR's MODEL price, with the half-cent floor as its spread
+(test_quality_ledger).
+
     python test_recording.py
 """
 
@@ -300,6 +304,64 @@ def test_pipeline_synthetic():
     check("report.json, report.md and figure.png are written", wrote)
 
 
+def test_quality_ledger():
+    """
+    Session O. Plant one defect of each kind in the synthetic chain and require the surface
+    builder's ledger to put each in its own bucket, to leave every other quote alone, and to
+    stop pricing a quote with no market at IBKR's model price -- which it did before.
+    """
+    print("\nthe data-quality ledger, against planted defects")
+    import run_real_data as rrd
+    with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
+        _, snap, _ = rrd.synthetic_inputs(pathlib.Path(d))
+        app, ctxs = replay.load(snap)
+    clean = {}
+    S0, rows0 = rrd.surface_from_snapshot(app, ctxs, "hybrid", ledger=clean)
+    used = [(r["expiry"], r["strike"], r["right"]) for r in rows0]
+    by_key = {}
+    for q in app.quotes.values():                    # every record of a contract, duplicates too
+        by_key.setdefault((q.expiry, q.strike, q.right), []).append(q)
+    # five quotes that are on the surface, one defect each
+    expiries = sorted({e for e, _, _ in used})
+    victims = [key for key in used if key[0] == expiries[-1]][:5]
+    fwd = ctxs[expiries[-1]].forward
+    plants = {"crossed": lambda q: setattr(q, "bid", q.ask + 0.10),
+              "no_bid": lambda q: setattr(q, "bid", 0.0),
+              "no_ask": lambda q: setattr(q, "ask", float("nan")),
+              "bounds": lambda q: (setattr(q, "bid", 2.0 * fwd), setattr(q, "ask", 2.0 * fwd + 0.02)),
+              "wide": lambda q: setattr(q, "ask", q.bid + 50.0)}
+    for key, (reason, plant) in zip(victims, plants.items()):
+        for q in by_key[key]:
+            plant(q)
+    # and one expiry thinned to three usable quotes
+    thin_exp = expiries[0]
+    thin_keys = [key for key in used if key[0] == thin_exp]
+    for key in thin_keys[3:]:
+        for q in by_key[key]:
+            q.bid = 0.0
+    led = {}
+    S1, rows1 = rrd.surface_from_snapshot(app, ctxs, "hybrid", ledger=led)
+    delta = {r: led["dropped"][r] - clean["dropped"][r] for r in led["dropped"]}
+    want = {"duplicate": 0, "expiry": 0, "itm": 0, "crossed": 1, "no_bid": 1 + len(thin_keys) - 3, "no_ask": 1,
+            "bounds": 1, "wide": 1}
+    check("each planted defect lands in its own bucket", delta == want, f"{delta}")
+    check("...and nothing else moves: kept falls by exactly the planted count",
+          clean["kept"] - led["kept"] == sum(want.values()), f"{clean['kept']} -> {led['kept']}")
+    check("an expiry left with three usable quotes is named as thin", thin_exp in led["thin_expiries"],
+          f"{led['thin_expiries']}")
+    n_contracts = len({(q.expiry, q.strike, q.right) for q in app.quotes.values()})
+    check("one record per contract: the seed pass's duplicates are counted, not used twice",
+          clean["dropped"]["duplicate"] == len(app.quotes) - n_contracts and len(set(used)) == len(used),
+          f"{len(app.quotes)} records, {n_contracts} contracts, {clean['dropped']['duplicate']} duplicates")
+    left = {(r["expiry"], r["strike"], r["right"]) for r in rows1}
+    check("no quote without a two-sided market reaches the surface (it used to, at IBKR's model price)",
+          not any(key in left for key in victims[:3]))
+    line = rrd._quality_text(led)
+    check("the report line names every reason and the thin expiry",
+          all(lab.split(" (")[0] in line for key, lab in rrd.DROP_REASONS if led["dropped"][key])
+          and thin_exp in line, line[:90] + "...")
+
+
 if __name__ == "__main__":
     print("=" * 74)
     print("Session G -- recording IBKR chains and history (offline, fake exchange)")
@@ -312,6 +374,7 @@ if __name__ == "__main__":
     test_delayed_session()
     test_check_mode()
     test_history()
+    test_quality_ledger()
     test_pipeline_synthetic()
     print("\n" + "=" * 74)
     print(f"{len(PASS)} passed, {len(FAIL)} failed   ({time.perf_counter()-t0:.0f}s)")

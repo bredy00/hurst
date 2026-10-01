@@ -415,23 +415,31 @@ def robust_profile_se(H_grid, runs, j, H_hat, lag=None):
             "J": J, "I": info, "lag": L_nw, "n": T}
 
 
-def filter_bank(runs, labels, forget=0.0, prior=None):
+def filter_bank(runs, labels, forget=0.0, prior=None, temper=1.0):
     """
     Bayesian model averaging over a grid of models run side by side: each filter's
     one-step predictive density N(nu_t; 0, S_t) updates the posterior weight of its
     grid point,
 
-        w_k(t) propto [(1 - forget) w_k(t-1) + forget / K] N(nu_k,t; 0, S_k,t)
+        w_k(t) propto [(1 - forget) w_k(t-1) + forget / K] N(nu_k,t; 0, S_k,t)^temper
 
     With forget = 0 the final weights are the normalised likelihoods (the profile
     likelihood as a posterior). forget > 0 lets the posterior move if the
     roughness itself changes -- H tracked online, not only estimated.
+
+    `temper` (Session O) is a learning rate on the likelihood. The filter's likelihood
+    is a quasi-likelihood, so a posterior built from it at full strength inherits the
+    curvature's optimism: on the synthetic history its sd read 0.023 against a robust
+    0.053. Raising it to 1 / ratio^2, the ratio being robust_profile_se's (robust over
+    curvature), gives a posterior whose spread matches the sandwich -- the curvature-
+    adjusted posterior of Mueller (2013) in its simplest form.
     Returns the weight path, the posterior mean and SD of the label over time.
     """
     labels = np.asarray(labels, float)
     K = len(runs)
     n = len(runs[0]["innov"])
     logd = np.stack([-0.5 * (np.log(2 * math.pi * r["S"]) + r["innov"] ** 2 / r["S"]) for r in runs], axis=1)
+    logd = float(temper) * logd
     w = np.full(K, 1.0 / K) if prior is None else np.asarray(prior, float) / np.sum(prior)
     W = np.empty((n, K))
     for t in range(n):

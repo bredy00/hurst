@@ -165,6 +165,27 @@ def test_robust_se():
           and kf.newey_west_lag(1008) == 6, f"500 -> {kf.newey_west_lag(500)}, 1008 -> {kf.newey_west_lag(1008)}")
 
 
+def test_tempered_bank():
+    """
+    Session O: `filter_bank(temper=)` on the same Gaussian location model. Data with sd 2
+    against a unit-variance model: at full strength the bank's posterior has the curvature's sd,
+    1/sqrt(T); tempered by 1/ratio^2 = 1/4 it must have the robust SE's, 2/sqrt(T).
+    """
+    print("\nThe tempered filter bank, where its answer is exact")
+    rng = np.random.default_rng(11)
+    T = 20000
+    grid = np.linspace(-0.06, 0.06, 241)
+    x = 2.0 * rng.standard_normal(T)
+    runs = [{"innov": x - h, "S": np.ones(T)} for h in grid]
+    b1 = kf.filter_bank(runs, grid)
+    check("temper = 1 is the bank as it was", np.allclose(kf.filter_bank(runs, grid, temper=1.0)["sd"], b1["sd"]))
+    b4 = kf.filter_bank(runs, grid, temper=0.25)
+    ratio = float(b4["sd"][-1] / b1["sd"][-1])
+    check("tempering by 1/ratio^2 widens the posterior by the ratio", abs(ratio - 2.0) < 0.05, f"{ratio:.3f} (want 2)")
+    check("...to the robust SE's size, 2/sqrt(T)", abs(float(b4["sd"][-1]) * math.sqrt(T) / 2.0 - 1) < 0.05,
+          f"sd {b4['sd'][-1]:.5f} against {2 / math.sqrt(T):.5f}")
+
+
 if __name__ == "__main__":
     print("=" * 74)
     print("Session I -- zero-boundary filtering protocol")
@@ -172,6 +193,7 @@ if __name__ == "__main__":
     t0 = time.perf_counter()
     test_transform()
     test_robust_se()
+    test_tempered_bank()
     test_panels()
     test_rv_filter_and_protocol()
     print("\n" + "=" * 74)

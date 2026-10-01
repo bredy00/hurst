@@ -1,0 +1,356 @@
+{
+ "A": {
+  "worst_relative_error": 3.069936033794559e-05,
+  "worst_rmse_vp": 8.455998213144316e-05,
+  "audit": {
+   "durrleman_min": 0.2756930144394105,
+   "worst_crossing": 0.0
+  }
+ },
+ "B": {
+  "essvi": {
+   "fits": [
+    {
+     "theta": 0.0001060370573629396,
+     "rho": -0.6153867627504394,
+     "psi": 0.009922189377809284,
+     "tau": 0.005479452054794521,
+     "n": 11,
+     "rmse_vp": 0.05091838084577815
+    },
+    {
+     "theta": 0.0003699665936548323,
+     "rho": -0.6143576850344494,
+     "psi": 0.01930131063602089,
+     "tau": 0.019178082191780823,
+     "n": 11,
+     "rmse_vp": 0.04222649594804542
+    },
+    {
+     "theta": 0.0007517930206224277,
+     "rho": -0.6165130528275558,
+     "psi": 0.027430513894932947,
+     "tau": 0.038356164383561646,
+     "n": 11,
+     "rmse_vp": 0.038028733080352484
+    },
+    {
+     "theta": 0.0016719562659170044,
+     "rho": -0.6220437878608704,
+     "psi": 0.03959788930555134,
+     "tau": 0.0821917808219178,
+     "n": 11,
+     "rmse_vp": 0.0334271483298347
+    },
+    {
+     "theta": 0.005493682023097331,
+     "rho": -0.6365805051466313,
+     "psi": 0.06394630140750975,
+     "tau": 0.2465753424657534,
+     "n": 11,
+     "rmse_vp": 0.025781698766871978
+    }
+   ],
+   "audit": {
+    "durrleman_min": 0.253350461857343,
+    "worst_crossing": 0.0
+   },
+   "err_vs_truth_vp": 0.03742405372057304,
+   "seconds": 14.190664900001138,
+   "rmse_vp": [
+    0.05091838084577815,
+    0.04222649594804542,
+    0.038028733080352484,
+    0.0334271483298347,
+    0.025781698766871978
+   ]
+  },
+  "raw_svi": {
+   "audit": {
+    "durrleman_min": 0.25392681104006254,
+    "worst_crossing": 0.0,
+    "crossing_pairs": 0
+   },
+   "err_vs_truth_vp": 0.005321169967123533,
+   "rmse_vp": [
+    0.0018267497298220632,
+    0.0031253619947928667,
+    0.005147283480396948,
+    0.006641596004710654,
+    0.0071573740019274254
+   ]
+  }
+ },
+ "C": {
+  "rows": [
+   {
+    "essvi_err": 0.15091222788481587,
+    "raw_err": 0.1701223150656347,
+    "essvi_audit": {
+     "durrleman_min": 0.25328994533539556,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": 0.18586207567880692,
+     "worst_crossing": -0.0003582613085289449,
+     "crossing_pairs": 1
+    }
+   },
+   {
+    "essvi_err": 0.13128811736167126,
+    "raw_err": 0.16978797731619327,
+    "essvi_audit": {
+     "durrleman_min": 0.25323943655009656,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": 0.24868794238966252,
+     "worst_crossing": -0.0032613252634369795,
+     "crossing_pairs": 1
+    }
+   },
+   {
+    "essvi_err": 0.11960194590665903,
+    "raw_err": 0.14549094472081125,
+    "essvi_audit": {
+     "durrleman_min": 0.2530905937854146,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": 0.22150647864189713,
+     "worst_crossing": -0.002120005601367456,
+     "crossing_pairs": 2
+    }
+   },
+   {
+    "essvi_err": 0.161275391887485,
+    "raw_err": 0.1963437768701007,
+    "essvi_audit": {
+     "durrleman_min": 0.25365894537549344,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": -0.002004689910340224,
+     "worst_crossing": -0.0205201051054174,
+     "crossing_pairs": 1
+    }
+   },
+   {
+    "essvi_err": 0.16110082090612998,
+    "raw_err": 0.21778539633373314,
+    "essvi_audit": {
+     "durrleman_min": 0.25337637112802425,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": 0.17407112950963954,
+     "worst_crossing": -0.0038399270585580975,
+     "crossing_pairs": 1
+    }
+   },
+   {
+    "essvi_err": 0.12421404418403513,
+    "raw_err": 0.16042123559707658,
+    "essvi_audit": {
+     "durrleman_min": 0.2530589492159514,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": 0.18988117060110604,
+     "worst_crossing": -0.002286200959651419,
+     "crossing_pairs": 1
+    }
+   },
+   {
+    "essvi_err": 0.15615170138044632,
+    "raw_err": 0.1942557390228561,
+    "essvi_audit": {
+     "durrleman_min": 0.25321905776157944,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": 0.07051214164766806,
+     "worst_crossing": -0.000889218647286397,
+     "crossing_pairs": 1
+    }
+   },
+   {
+    "essvi_err": 0.12197066380524244,
+    "raw_err": 0.17631188145835047,
+    "essvi_audit": {
+     "durrleman_min": 0.25293427131929375,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": 0.09222052235695352,
+     "worst_crossing": -0.008925457171868788,
+     "crossing_pairs": 1
+    }
+   },
+   {
+    "essvi_err": 0.12317124129868828,
+    "raw_err": 0.17126657574311066,
+    "essvi_audit": {
+     "durrleman_min": 0.25347736431700457,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": -17754961.064637728,
+     "worst_crossing": 0.0,
+     "crossing_pairs": 0
+    }
+   },
+   {
+    "essvi_err": 0.17456341041954113,
+    "raw_err": 0.20543849033324732,
+    "essvi_audit": {
+     "durrleman_min": 0.253249321082901,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": 0.25603102426668994,
+     "worst_crossing": -0.001391423771099006,
+     "crossing_pairs": 1
+    }
+   },
+   {
+    "essvi_err": 0.15281924011807824,
+    "raw_err": 0.18708048785861212,
+    "essvi_audit": {
+     "durrleman_min": 0.25327907114849363,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": 0.11614420516904984,
+     "worst_crossing": -0.013441202535873071,
+     "crossing_pairs": 1
+    }
+   },
+   {
+    "essvi_err": 0.14498778519294195,
+    "raw_err": 0.19221336785652762,
+    "essvi_audit": {
+     "durrleman_min": 0.2538042225950781,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": 0.08483390209738531,
+     "worst_crossing": 0.0,
+     "crossing_pairs": 0
+    }
+   },
+   {
+    "essvi_err": 0.1715816956394371,
+    "raw_err": 0.23176810200279727,
+    "essvi_audit": {
+     "durrleman_min": 0.25387790924211895,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": 0.23495223315423006,
+     "worst_crossing": -0.002195573913576618,
+     "crossing_pairs": 2
+    }
+   },
+   {
+    "essvi_err": 0.17734840197731722,
+    "raw_err": 0.2497431880537609,
+    "essvi_audit": {
+     "durrleman_min": 0.2530345099105344,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": -0.03205525816178465,
+     "worst_crossing": -0.025047700921863893,
+     "crossing_pairs": 2
+    }
+   },
+   {
+    "essvi_err": 0.16873429857452757,
+    "raw_err": 0.1800240157962666,
+    "essvi_audit": {
+     "durrleman_min": 0.2533745107837156,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": 0.24744562579733176,
+     "worst_crossing": 0.0,
+     "crossing_pairs": 0
+    }
+   },
+   {
+    "essvi_err": 0.1577907180708388,
+    "raw_err": 0.226098285593542,
+    "essvi_audit": {
+     "durrleman_min": 0.2532640122705064,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": 0.10742206176204278,
+     "worst_crossing": -0.006251248006178585,
+     "crossing_pairs": 2
+    }
+   },
+   {
+    "essvi_err": 0.12251162247938839,
+    "raw_err": 0.16407354863013224,
+    "essvi_audit": {
+     "durrleman_min": 0.25331775027388564,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": 0.19458231871549253,
+     "worst_crossing": -0.0030705643469823634,
+     "crossing_pairs": 1
+    }
+   },
+   {
+    "essvi_err": 0.1494893592252849,
+    "raw_err": 0.17654802997771005,
+    "essvi_audit": {
+     "durrleman_min": 0.253633438482774,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": 0.22844314093149432,
+     "worst_crossing": -0.00329214516526377,
+     "crossing_pairs": 1
+    }
+   },
+   {
+    "essvi_err": 0.15365988209616574,
+    "raw_err": 0.2086918685019499,
+    "essvi_audit": {
+     "durrleman_min": 0.2532948494773669,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": 0.020592154444944194,
+     "worst_crossing": -0.0008688712015165767,
+     "crossing_pairs": 1
+    }
+   },
+   {
+    "essvi_err": 0.15308895899402775,
+    "raw_err": 0.24840430076215955,
+    "essvi_audit": {
+     "durrleman_min": 0.25381517061647896,
+     "worst_crossing": 0.0
+    },
+    "raw_audit": {
+     "durrleman_min": -0.17472649820516828,
+     "worst_crossing": -0.22110258720573145,
+     "crossing_pairs": 3
+    }
+   }
+  ],
+  "essvi_err_mean": 0.1488130763701361,
+  "raw_err_mean": 0.1935934763747286,
+  "essvi_better_share": 1.0,
+  "raw_arbitrage_share": 0.9,
+  "raw_butterfly_share": 0.2,
+  "raw_calendar_share": 0.85,
+  "essvi_arbitrage_share": 0.0
+ },
+ "seconds": 364.02737959998194
+}
