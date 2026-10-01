@@ -161,6 +161,26 @@ python volsurf.py record --check        # the IBKR smoke test (needs IB Gateway)
 
 ---
 
+## 7. Change the cost problem, or add a rule to it
+
+`rl/cost_env.py` (Session O) is small on purpose. `CostProblem` carries every knob — `sigma`,
+`T`, `n_dates`, `cost` (proportional, per unit traded), `risk` (the mean-variance weight) —
+and a rule is any function `choose(k, S, h) -> a`, vectorised over paths:
+
+```python
+import numpy as np, rl.cost_env as ce
+P = ce.CostProblem(cost=0.005, n_dates=64)
+half = lambda k, S, h: h + 0.5 * (P.delta(S, k) - h)       # trade halfway to the delta
+te = ce.simulate(P, 20000, seed=99)
+dp = ce.solve_dp(P)
+print(ce.evaluate(P, te, half)["J"], ce.evaluate(P, te, dp["policy"])["J"])
+```
+
+Score a rule against `solve_dp` on the same paths — the gap, not the level, is the finding —
+and `ce.no_trade_band(rule, k, S)` gives any rule's band, so it can be laid beside the DP's.
+If you give `KnownCostFQI` a new problem, its `degree_a` is the knob that matters: at 128
+dates the gap to the DP was the basis's, not the data's.
+
 ## What to run after you change something
 
 ```bash

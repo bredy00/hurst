@@ -58,3 +58,35 @@ D  the gap to Hedged Monte Carlo (0.3050), attributed one change at a time:
    the mark alone 44.3%, the known reward alone 54.2%, both 91.5%: additive to within 6.9% of the gap
 
 [done in 32s] -> C:\Projects\volatility-surface-tuning\captures\rl.json
+
+# Session O (2026-09-29): python study_rl.py T
+T  32 dates: cost 20 bp, risk aversion 1000, premium 0.0230; 20000 training and 20000 test paths
+   the DP's own value -0.4449 against its policy's score -0.4460 +/- 0.0024: the answer key is consistent
+   at mid-life, at the money: Whalley-Wilmott's half-width 0.066 against the delta's move between dates 0.100
+     rule                                   objective / premium    of which cost   risk   turnover   gap to the DP
+     the Bellman equation on a grid         -0.4460 +/- 0.0024    0.1665    0.2796    1.92     
+     known cost, risk by moments            -0.4469 +/- 0.0024    0.1634    0.2835    1.88     -0.0009 +/- 0.0001
+     known cost, myopic (no continuation)   -0.4495 +/- 0.0024    0.1604    0.2891    1.85     -0.0035 +/- 0.0002
+     known cost, risk fitted directly       -0.4765 +/- 0.0026    0.1724    0.3041    1.99     -0.0304 +/- 0.0005
+     generic fitted-Q, myopic               -0.5367 +/- 0.0025    0.1954    0.3413    2.25     -0.0906 +/- 0.0009
+     generic fitted-Q, bootstrapped         -0.5425 +/- 0.0027    0.1976    0.3449    2.27     -0.0965 +/- 0.0009
+     the Bellman equation, 21 actions       -0.4588 +/- 0.0024    0.1669    0.2919    1.92     -0.0128 +/- 0.0003
+     Black-Scholes delta, every date        -0.4630 +/- 0.0024    0.1980    0.2650    2.28     -0.0170 +/- 0.0004
+     Leland (1985)                          -0.4824 +/- 0.0022    0.1880    0.2944    2.17     -0.0364 +/- 0.0006
+     Whalley-Wilmott (1997) band            -0.5349 +/- 0.0029    0.1210    0.4140    1.39     -0.0889 +/- 0.0013
+     the initial delta, never traded        -6.6194 +/- 0.0293    0.0444    6.5750    0.51     -6.1734 +/- 0.0301
+T  128 dates: cost 20 bp, risk aversion 1000, premium 0.0230; 20000 training and 20000 test paths
+   the DP's own value -0.3065 against its policy's score -0.3030 +/- 0.0010: the answer key is consistent
+   at mid-life, at the money: Whalley-Wilmott's half-width 0.066 against the delta's move between dates 0.050
+     rule                                   objective / premium    of which cost   risk   turnover   gap to the DP
+     the Bellman equation on a grid         -0.3030 +/- 0.0010    0.1850    0.1180    2.13     
+     known cost, risk by moments            -0.3379 +/- 0.0010    0.1519    0.1860    1.75     -0.0350 +/- 0.0002
+     known cost, myopic (no continuation)   -0.4556 +/- 0.0008    0.1275    0.3281    1.47     -0.1527 +/- 0.0006
+     known cost, degree 8 in the action     -0.3264 +/- 0.0009    0.1603    0.1661    1.85     -0.0235 +/- 0.0002
+     Black-Scholes delta, every date        -0.4225 +/- 0.0012    0.3551    0.0674    4.09     -0.1195 +/- 0.0004
+     Leland (1985)                          -0.4808 +/- 0.0009    0.3185    0.1622    3.67     -0.1778 +/- 0.0005
+     Whalley-Wilmott (1997) band            -0.3345 +/- 0.0012    0.1466    0.1879    1.69     -0.0315 +/- 0.0003
+     the initial delta, never traded        -6.6528 +/- 0.0251    0.0444    6.6084    0.51     -6.3498 +/- 0.0258
+   bootstrapping is worth +0.0026 of the premium at 32 dates and +0.1177 at 128 (the known-cost learner against its own myopic version) -- in Session M's bandits it was worth nothing and cost 20x
+
+[done in 747s] -> C:\Projects\volatility-surface-tuning\captures\rl.json

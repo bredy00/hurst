@@ -17,6 +17,10 @@ because both problems it is pointed at have a known optimum:
   D  where that gap comes from (Session N), attributed one change at a time. It is NOT the
      argmax, which Session M blamed: an agent acting at the quadratic's vertex scores the
      same. It is treating a known reward as a black box, and a mark that is not a martingale.
+  T  hedging with proportional transaction costs (Session O): the first genuine MDP here,
+     since the holding carried forward is the action. Graded against the Bellman equation
+     solved on a grid, Whalley-Wilmott's band, Leland's rule and the delta; both learners --
+     the framework's generic fitted-Q and one that keeps the known cost exact.
   F  filter selection at the zero boundary, learned offline from logged filter runs, against
      the written protocol of Session I and against the converged 64-substep particle filter.
   C  what the framework costs, beside the analytic machinery it sits next to.
@@ -38,6 +42,7 @@ import models.hedging as hd
 import models.rough_heston as rh
 import rl
 import rl.agents as ag
+import rl.cost_env as ce
 import rl.hedging_env as he
 import rl.mdp as mdp
 from rl.markov import markov_test, report
@@ -364,6 +369,124 @@ def section_c(batch):
     return out
 
 
+# ------------------------------------------------------------------ T: transaction costs
+def _cost_table(prob, te, rules, dp_rule):
+    """Score every rule on the same test paths; the gap to the DP is paired, so its SE is the
+    SE of the per-path difference, much smaller than either score's."""
+    ref = ce.evaluate(prob, te, dp_rule)["per_path"]
+    rows = []
+    for label, rule, secs in rules:
+        r = ce.evaluate(prob, te, rule)
+        d = r["per_path"] - ref
+        rows.append({"rule": label, "J": r["J"], "J_se": r["J_se"], "cost": r["cost"], "risk": r["risk"],
+                     "turnover": r["turnover"], "gap": float(d.mean()),
+                     "gap_se": float(d.std(ddof=1) / np.sqrt(len(d))), "fit_seconds": secs})
+    return rows
+
+
+def _say_table(rows):
+    say("     rule                                   objective / premium    of which cost   risk   "
+        "turnover   gap to the DP")
+    for i, r in enumerate(rows):
+        gap = "" if i == 0 else f"{r['gap']:+.4f} +/- {r['gap_se']:.4f}"
+        say(f"     {r['rule']:38s} {r['J']:+.4f} +/- {r['J_se']:.4f}    {r['cost']:.4f}    {r['risk']:.4f}   "
+            f"{r['turnover']:5.2f}     {gap}")
+
+
+def section_t(n_train=20_000, n_test=20_000):
+    """
+    Session O. A one-month at-the-money call under Black-Scholes, proportional costs, a
+    mean-variance objective (rl/cost_env.py). The holding carried into each date is the last
+    action, so the next state depends on the action: for the first time here the problem is
+    not a bandit, and bootstrapping has something to do.
+    """
+    out = {}
+    for label, prob in (("32 dates", ce.CostProblem()), ("128 dates", ce.CostProblem(n_dates=128))):
+        t0 = time.perf_counter()
+        dp = ce.solve_dp(prob)
+        t_dp = time.perf_counter() - t0
+        te = ce.simulate(prob, n_test, seed=99)
+        tr = ce.transitions(prob, ce.simulate(prob, n_train, seed=1), seed=0)
+        rules = [("the Bellman equation on a grid", dp["policy"], t_dp)]
+        fits = [("known cost, risk by moments", dict(risk="moments")),
+                ("known cost, myopic (no continuation)", dict(risk="moments", continuation=False)),
+                ("known cost, risk fitted directly", dict(risk="direct"))]
+        if prob.n_dates > 32:
+            # the band outgrows the delta's move between dates and the continuation grows sharp
+            # shoulders; the gap is then the basis's, which a higher degree in the action closes
+            fits = fits[:2] + [("known cost, degree 8 in the action", dict(risk="moments", degree_a=8))]
+        learners = {}
+        for name, kw in fits:
+            t0 = time.perf_counter()
+            learners[name] = ce.KnownCostFQI(prob, **kw).fit(tr)
+            rules.append((name, learners[name].rule(), time.perf_counter() - t0))
+        if prob.n_dates == 32:
+            b = ce.generic_batch(prob, tr)
+            for name, model in (("generic fitted-Q, myopic", ag.FittedQ(sweeps=1, gamma=0.0)),
+                                ("generic fitted-Q, bootstrapped", ag.FittedQ(sweeps=40, gamma=1.0))):
+                t0 = time.perf_counter()
+                model.fit(b)
+                rules.append((name, ce.generic_rule(prob, model, tr["grid"]), time.perf_counter() - t0))
+            dp21 = ce.solve_dp(prob, n_h=21)
+            rules.append(("the Bellman equation, 21 actions", dp21["policy"], 0.0))
+        rules += [("Black-Scholes delta, every date", ce.bs_rule(prob), 0.0),
+                  ("Leland (1985)", ce.leland_rule(prob), 0.0),
+                  ("Whalley-Wilmott (1997) band", ce.ww_rule(prob), 0.0),
+                  ("the initial delta, never traded", ce.static_rule(prob), 0.0)]
+        rows = _cost_table(prob, te, rules, dp["policy"])
+        mid = prob.n_dates // 2
+        w_ww = float(ce.ww_halfwidth(prob, np.array([1.0]), mid)[0])
+        move = float(np.sqrt(np.exp(prob.sigma ** 2 * prob.dt) - 1) * prob.gamma(np.array([1.0]), mid)[0])
+        say(f"T  {label}: cost {1e4 * prob.cost:.0f} bp, risk aversion {prob.risk:g}, premium {prob.price():.4f}; "
+            f"{n_train} training and {n_test} test paths")
+        say(f"   the DP's own value {dp['V0']:+.4f} against its policy's score {rows[0]['J']:+.4f} "
+            f"+/- {rows[0]['J_se']:.4f}: the answer key is consistent")
+        say(f"   at mid-life, at the money: Whalley-Wilmott's half-width {w_ww:.3f} against the delta's move "
+            f"between dates {move:.3f}")
+        _say_table(rows)
+        S_band = np.linspace(0.94, 1.06, 13)
+        bands = {"S": S_band.tolist(), "dp": ce.no_trade_band(dp["policy"], mid, S_band).tolist(),
+                 "ww": ce.no_trade_band(ce.ww_rule(prob), mid, S_band).tolist(),
+                 "known cost": ce.no_trade_band(learners["known cost, risk by moments"].rule(), mid, S_band).tolist(),
+                 "delta": prob.delta(S_band, mid).tolist()}
+        out[label] = {"problem": prob.__dict__, "V0": dp["V0"], "rows": rows, "ww_halfwidth": w_ww,
+                      "delta_move": move, "bands_mid_life": bands}
+    worth = {}
+    for label in ("32 dates", "128 dates"):
+        rows = {r["rule"]: r for r in out[label]["rows"]}
+        worth[label] = rows["known cost, risk by moments"]["J"] - rows["known cost, myopic (no continuation)"]["J"]
+    out["bootstrapping_worth"] = worth
+    say(f"   bootstrapping is worth {worth['32 dates']:+.4f} of the premium at 32 dates and "
+        f"{worth['128 dates']:+.4f} at 128 (the known-cost learner against its own myopic version) -- "
+        f"in Session M's bandits it was worth nothing and cost 20x")
+    return out
+
+
+def plot_t(res):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from ui import theme
+    theme.apply("light")
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.6))
+    for ax, label in zip(axes, ("32 dates", "128 dates")):
+        b = res["T"][label]["bands_mid_life"]
+        S = np.array(b["S"])
+        for i, (key, lab, ls) in enumerate((("dp", "the Bellman equation", "-"),
+                                            ("known cost", "known-cost learner", "--"),
+                                            ("ww", "Whalley-Wilmott", ":"))):
+            band = np.array(b[key])
+            ax.plot(S, band[:, 0], ls, color=theme.series(i), label=lab)
+            ax.plot(S, band[:, 1], ls, color=theme.series(i))
+        ax.plot(S, b["delta"], color=theme.series(3), lw=0.8, label="Black-Scholes delta")
+        ax.set_title(f"no-trade band at mid-life, {label}")
+        ax.set_xlabel("S")
+        ax.set_ylabel("holding")
+        ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(ROOT / "captures" / "rl_costs.png", dpi=120)
+
+
 def plot(res):
     import matplotlib
     matplotlib.use("Agg")
@@ -424,9 +547,9 @@ def plot(res):
 
 def main(argv):
     rl.enable()
-    want = [a.upper() for a in argv] or ["A", "M", "H", "D", "C"]
+    want = [a.upper() for a in argv] or ["A", "M", "H", "D", "T", "C"]
     if want == ["ALL"]:
-        want = ["A", "M", "H", "D", "C", "F"]
+        want = ["A", "M", "H", "D", "T", "C", "F"]
     res = json.loads(OUT.read_text(encoding="utf-8")) if OUT.exists() else {}
     t0 = time.perf_counter()
     need_hedging = {"M", "H", "D", "C"} & set(want)
@@ -442,6 +565,9 @@ def main(argv):
         res["H2"] = section_h_scaling(te, price)
     if "D" in want:
         res["D"] = section_d(tr, te, price)
+    if "T" in want:
+        res["T"] = section_t()
+        plot_t(res)
     if "C" in want:
         res["C"] = section_c(batch)
     if "F" in want:

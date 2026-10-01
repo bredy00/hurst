@@ -16,6 +16,9 @@ Session M -- the reinforcement-learning framework (`rl/`).
   filtering     the offline batch carries one row per (day, filter); the protocol policy
                 reproduces `filters.protocol`'s own threshold rule
   registry      a user agent joins by decorator and is scored like the rest
+  costs         (Session O) hedging with transaction costs: the DP's value is what its policy
+                scores, the holding carried forward is the action (not a bandit), no cost gives
+                the delta, and the known-cost learner reaches the DP
 
     python test_rl.py
 """
@@ -361,6 +364,62 @@ def test_session_n():
           and not np.array_equal(b1.reward, b2.reward))
 
 
+def test_costs():
+    """
+    Session O: rl/cost_env.py. The answer key must be consistent (the DP's value is what its
+    policy scores), the problem must NOT be a bandit, the frictionless limit must be the
+    delta, and the known-cost learner must reach the DP on a problem small enough to run here.
+    """
+    print("\nSession O: hedging with transaction costs, the first genuine MDP")
+    rl.enable()
+    import rl.cost_env as ce
+    P = ce.CostProblem(n_dates=16)
+    dp = ce.solve_dp(P, n_h=51, n_x=201)
+    te = ce.simulate(P, 8000, seed=5)
+    r_dp = ce.evaluate(P, te, dp["policy"])
+    check("the DP's own value is what its policy scores on fresh paths (3 SE)",
+          abs(dp["V0"] - r_dp["J"]) < 3 * r_dp["J_se"], f"V0 {dp['V0']:+.4f} against {r_dp['J']:+.4f} +/- {r_dp['J_se']:.4f}")
+    tr = ce.transitions(P, ce.simulate(P, 8000, seed=6), seed=0)
+    b = ce.generic_batch(P, tr)
+    h_col = b.phi_next[:, 3]                                # the holding carried into the next date
+    check("NOT a bandit: the holding carried forward is exactly the action",
+          np.array_equal(h_col, tr["grid"][b.action]), "h' = a on every transition")
+    P0 = ce.CostProblem(n_dates=16, cost=1e-9)
+    dp0 = ce.solve_dp(P0, n_h=101, n_x=201)
+    S_mid = np.linspace(0.95, 1.05, 11)
+    a0 = dp0["policy"](8, S_mid, np.zeros_like(S_mid))
+    gap0 = float(np.max(np.abs(a0 - P0.delta(S_mid, 8))))
+    check("with no cost the optimum is the delta, to the grid's resolution", gap0 <= 0.02,
+          f"worst |a - delta| {gap0:.3f} at mid-life (grid step 0.01)")
+    band = ce.no_trade_band(dp["policy"], 8, np.array([1.0]))[0]
+    d_mid = float(P.delta(np.array([1.0]), 8)[0])
+    check("with a cost there is a no-trade band, and it contains the delta", band[0] < d_mid < band[1]
+          and band[1] - band[0] > 0.02, f"band [{band[0]:.3f}, {band[1]:.3f}] around delta {d_mid:.3f}")
+    kc = ce.KnownCostFQI(P).fit(tr)
+    r_kc = ce.evaluate(P, te, kc.rule())
+    d = r_kc["per_path"] - r_dp["per_path"]
+    check("the known-cost learner reaches the DP within 1% of its objective, model-free",
+          abs(d.mean()) < 0.01 * abs(r_dp["J"]), f"{r_kc['J']:+.4f} against {r_dp['J']:+.4f}")
+
+    def paired(x, y):
+        """mean of x - y over the same paths, in its own standard errors"""
+        dd = x["per_path"] - y["per_path"]
+        return float(dd.mean() / (dd.std(ddof=1) / np.sqrt(len(dd))))
+
+    # the comparisons need a horizon where the band matters: Session O's own base case
+    P32 = ce.CostProblem()
+    te32 = ce.simulate(P32, 8000, seed=5)
+    tr32 = ce.transitions(P32, ce.simulate(P32, 8000, seed=6), seed=0)
+    full = ce.evaluate(P32, te32, ce.KnownCostFQI(P32).fit(tr32).rule())
+    myo = ce.evaluate(P32, te32, ce.KnownCostFQI(P32, continuation=False).fit(tr32).rule())
+    bs = ce.evaluate(P32, te32, ce.bs_rule(P32))
+    z_bs, z_my = paired(full, bs), paired(full, myo)
+    check("at 32 dates the learner beats trading to the delta every date (paired, 3 SE)", z_bs > 3,
+          f"{full['J']:+.4f} against {bs['J']:+.4f}: {z_bs:.1f} SE")
+    check("...and bootstrapping pays, as it could not in Session M's bandits (paired, 3 SE)", z_my > 3,
+          f"{full['J']:+.4f} with the continuation, {myo['J']:+.4f} myopic: {z_my:.1f} SE")
+
+
 if __name__ == "__main__":
     print("=" * 74)
     print("Session M -- the reinforcement-learning framework")
@@ -373,6 +432,7 @@ if __name__ == "__main__":
     test_filter_env()
     test_registry()
     test_session_n()
+    test_costs()
     print("\n" + "=" * 74)
     print(f"{len(PASS)} passed, {len(FAIL)} failed")
     for f in FAIL:

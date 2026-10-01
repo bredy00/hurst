@@ -3,7 +3,9 @@
 *Session M, 26 September 2026. `rl/` (7 modules), `study_rl.py`, `test_rl.py` (47 checks),
 four standing health checks, `captures/rl.{json,log,png}`. Quick reference: `rl/README.md`.
 Revert: `git rm -r rl study_rl.py test_rl.py docs/rl-framework.md` — nothing else imports it.
-Session N (27 September) corrected §3: the gap to Hedged Monte Carlo is not the argmax.*
+Session N (27 September) corrected §3: the gap to Hedged Monte Carlo is not the argmax.
+Session O (29 September) added transaction costs, the first genuine MDP here (`rl/cost_env.py`,
+`test_rl.py` now 54 checks).*
 
 ## What was asked for
 
@@ -229,6 +231,60 @@ on what a real implementation could achieve: filters carry state, and switching 
 re-initialising from a posterior the next filter does not represent exactly.
 `switch_penalty` exists to charge for it, and is zero in the headline numbers.
 
+## Transaction costs: a genuine MDP (Session O)
+
+Charge for trading and the hedging problem stops being a bandit: the holding carried into the
+next date *is* this date's action, so the next state depends on the action and bootstrapping
+finally has something to do (`rl/cost_env.py`, `study_rl.py T`). The optimum is a no-trade band
+around the frictionless hedge. Under Black–Scholes the state is (date, S, holding), so the
+Bellman equation can be solved on a grid — the answer key, whose own value matches its policy's
+Monte Carlo score to half a standard error. The structure also separates:
+
+    Q_k(S, h, a) = − cost·S·|a − h| + G_k(S, a)
+
+so the holding enters only through the cost, which is known.
+
+One-month ATM call, 20 bp proportional cost, risk aversion 1000, 20,000 training and 20,000 test
+paths; objective per unit premium (higher is better), gaps paired against the DP on the same paths:
+
+| rule | 32 dates | gap to the DP | 128 dates | gap to the DP |
+|---|---|---|---|---|
+| **the Bellman equation on a grid** | **−0.4460** | | **−0.3030** | |
+| known cost, risk by moments | −0.4469 | **−0.0009 ± 0.0001** | −0.3379 | −0.0350 |
+| …degree 8 in the action | | | −0.3264 | −0.0235 |
+| …myopic (no continuation) | −0.4495 | −0.0035 | −0.4556 | −0.1527 |
+| known cost, risk fitted directly | −0.4765 | −0.0304 | | |
+| generic fitted-Q, myopic | −0.5367 | −0.0906 | | |
+| generic fitted-Q, bootstrapped | −0.5425 | −0.0965 | | |
+| the Bellman equation, 21 actions | −0.4588 | −0.0128 | | |
+| Black–Scholes delta, every date | −0.4630 | −0.0170 | −0.4225 | −0.1195 |
+| Leland (1985) | −0.4824 | −0.0364 | −0.4808 | −0.1778 |
+| Whalley–Wilmott (1997) band | −0.5349 | −0.0889 | −0.3345 | −0.0315 |
+
+What it shows:
+
+- **An agent that keeps the known cost exact and learns the risk by moments reaches the optimum**
+  — to 0.0009 of the premium at 32 dates, model-free, from random-action transitions. It beats
+  the DP restricted to 21 actions, and every closed-form rule at both horizons.
+- **Session N's lesson, twice over.** The same agent fitting the squared target directly loses
+  to delta hedging (−0.4765); fitting it by moments — the hedge ratio the way Hedged Monte Carlo
+  fits it, E[dS² | S] on its own — reaches the DP. The black-box fitted-Q, reward and all
+  learned, loses by 0.09.
+- **Bootstrapping pays here** — +0.0026 of the premium at 32 dates, +0.118 at 128 — where in
+  Session M's bandits it was worth nothing and cost 20×. And the black-box agent's bootstrapped
+  version is still *worse* than its myopic one: bootstrapping propagates whatever the
+  approximation gets wrong, so it pays only once the approximation is right.
+- **Whalley–Wilmott's band is an asymptote.** At 32 dates it loses even to trading to the delta
+  every date: its half-width at the money (0.066) is smaller than the delta's move between dates
+  (0.100), so it spends its time at the band's edge, far from the hedge. At 128 dates, where the
+  band is wider than that move (0.066 against 0.050), it beats the delta by a wide margin and
+  is still 10% short of the DP. The closed form has the right shape and, at any rebalancing
+  frequency a desk would use, the wrong size.
+- **At 128 dates the agent's gap is its basis, not its data.** A quartic in the action leaves
+  0.035; degree 6 leaves 0.029 with 20,000 or 60,000 paths alike; degree 8 leaves 0.024, ahead of
+  Whalley–Wilmott. The band is wider than a step there and the continuation grows sharp shoulders
+  at its edges. A local (hat-function) basis did worse, and at fine knots collapsed.
+
 ## What it costs
 
 On 32,000 paths, for the same hedging answer:
@@ -262,8 +318,10 @@ Not nothing, and the boundary is sharp:
 
 ## Next
 
-- A cost model with a genuine no-trade region, where the optimum is a threshold nobody has
-  written down. That is the first problem in this codebase an agent could win.
+- ~~A cost model with a genuine no-trade region.~~ Done in Session O, above: in the world where
+  the DP can be computed, the known-cost agent reaches it. The contest that remains is the
+  rough Heston world, where no DP exists — the agent against Whalley–Wilmott around Hedged
+  Monte Carlo's delta, on the same paths. That is where an agent could win outright.
 - Charge `switch_penalty` properly and re-run the filtering comparison against a switching
   implementation rather than against logged full runs.
 - ~~Fit Q(s, a) as an explicit quadratic in a and solve for the vertex.~~ Done in Session N

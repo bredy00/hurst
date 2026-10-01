@@ -147,6 +147,39 @@ what a real implementation could reach — filters carry state, and switching me
 re-initialising from a posterior the next filter does not represent exactly.
 `switch_penalty` exists to charge for that.
 
+## 4b. Transaction costs: the first genuine MDP (Session O)
+
+`rl/cost_env.py`. With a proportional cost on trading, the holding carried forward is the
+action, so the next state depends on it — not a bandit — and the optimum is a no-trade band.
+Under Black–Scholes the Bellman equation is solved on a grid (`solve_dp`), which is the answer
+key; `KnownCostFQI` keeps the known cost exact and learns the rest from transitions.
+
+| 32 dates, 20 bp | objective / premium | gap to the DP |
+|---|---|---|
+| **the Bellman equation on a grid** | **−0.4460** | |
+| known cost, risk by moments | −0.4469 | **−0.0009 ± 0.0001** |
+| known cost, myopic | −0.4495 | −0.0035 |
+| generic fitted-Q (black box) | −0.5367 | −0.0906 |
+| Black–Scholes delta, every date | −0.4630 | −0.0170 |
+| Whalley–Wilmott band | −0.5349 | −0.0889 |
+
+The learner that keeps the cost exact **reaches the optimum**, model-free, and bootstrapping
+pays (+0.0026 here, +0.118 at 128 dates). Whalley–Wilmott's closed-form band loses to plain
+delta hedging at 32 dates, because its half-width is smaller than the delta's move between
+dates; at 128 dates it wins over the delta and is still 10% short of the DP. Full table and
+the basis finding at 128 dates: `docs/rl-framework.md`.
+
+```python
+import rl, rl.cost_env as ce
+rl.enable()
+P = ce.CostProblem(cost=0.002, n_dates=32)
+dp = ce.solve_dp(P)                                            # the answer key
+tr = ce.transitions(P, ce.simulate(P, 20000, seed=1))          # random-action logs
+agent = ce.KnownCostFQI(P).fit(tr)
+te = ce.simulate(P, 20000, seed=99)
+print(ce.evaluate(P, te, agent.rule())["J"], ce.evaluate(P, te, dp["policy"])["J"])
+```
+
 ## 5. Adding your own agent
 
 One decorator; `docs/customising.md` §4 has a working example.
