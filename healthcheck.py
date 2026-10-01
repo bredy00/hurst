@@ -1197,6 +1197,54 @@ def h_session_n():
            note="captures/real/ is trackable by design: safe only while the repository is private")
 
 
+def h_session_o():
+    """
+    Session O. Four things whose failure would be silent: the tempered bank losing its scale,
+    eSSVI no longer finding a surface it was given, the calendar guard waving through a pair
+    that crosses, and the cost problem's answer key disagreeing with its own policy.
+    """
+    import filters.kalman as kf
+    import fit.essvi as es
+    import rl.cost_env as ce
+    G = "Session O: readings, eSSVI, transaction costs"
+
+    rng = np.random.default_rng(11)
+    T = 20000
+    grid = np.linspace(-0.06, 0.06, 241)
+    x = 2.0 * rng.standard_normal(T)
+    runs = [{"innov": x - h, "S": np.ones(T)} for h in grid]
+    r_t = float(kf.filter_bank(runs, grid, temper=0.25)["sd"][-1] / kf.filter_bank(runs, grid)["sd"][-1])
+    record(G, "tempered bank widens by the sandwich ratio (want 2)", abs(r_t - 2), 0.05, abs(r_t - 2) < 0.05,
+           note=f"ratio {r_t:.3f}; data sd 2 against a unit-variance model")
+
+    fits, sl = [], []
+    for d in (7, 30, 90):
+        t = d / 365
+        th = 0.04 * t + 0.002 * math.sqrt(t)
+        f = dict(theta=th, rho=-0.7 + 0.2 * t, psi=0.35 * math.sqrt(th))
+        fits.append(f)
+        kk = np.linspace(-3, 3, 13) * math.sqrt(th)
+        sl.append((t, kk, np.sqrt(es.essvi_w(kk, **f) / t)))
+    got = es.fit_surface(sl)
+    err = max(abs(g[p] - f[p]) / abs(f[p]) for g, f in zip(got, fits) for p in ("theta", "rho", "psi"))
+    record(G, "eSSVI recovers a planted surface (worst relative error)", err, 1e-3, err < 1e-3,
+           note="three slices, every candidate inside the no-arbitrage set")
+    pairs = [({"theta": 0.19751342800280938, "rho": -0.06694123118980044, "psi": 0.006656019081863228},
+              (0.3717105066840333, 0.9856673053322245, 1.3014524582640832)),
+             ({"theta": 0.19004835999064354, "rho": 0.9341225583406774, "psi": 0.046705749706769356},
+              (0.4858756539480947, -0.4894176414986581, 0.1870504030340544))]
+    passed = sum(bool(es.calendar_ok(p0, *p1)) for p0, p1 in pairs)
+    record(G, "crossing pairs the cheap conditions miss, waved through", float(passed), 0.0, passed == 0,
+           note="one crossing near the money, one only between k = 8 and 23")
+
+    P = ce.CostProblem(n_dates=16)
+    dp = ce.solve_dp(P, n_h=51, n_x=201)
+    r = ce.evaluate(P, ce.simulate(P, 8000, seed=5), dp["policy"])
+    z = abs(dp["V0"] - r["J"]) / r["J_se"]
+    record(G, "cost DP: its value against its own policy's score, in SE", z, 3.0, z < 3.0,
+           note=f"V0 {dp['V0']:+.4f}, scored {r['J']:+.4f}; 16 dates, 20 bp")
+
+
 def h_engineering():
     out = subprocess.run(
         [sys.executable, "-c",
@@ -1276,7 +1324,7 @@ CHECKS = [h_timing, h_normal, h_black_scholes, h_finite_difference, h_char_func,
           h_hurst, h_forward, h_svi, h_arbitrage, h_calibration,
           h_fractional_kernel, h_lift, h_rough_robustness, h_identifiability_rough,
           h_hawkes, h_kalman, h_recording, h_positivity, h_lift_fidelity, h_weighting, h_learn_h,
-          h_zero_boundary, h_clock, h_hedging, h_lift_44, h_rl, h_session_n, h_engineering,
+          h_zero_boundary, h_clock, h_hedging, h_lift_44, h_rl, h_session_n, h_session_o, h_engineering,
           h_replay]
 
 

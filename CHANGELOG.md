@@ -1,6 +1,48 @@
 # Changelog
 
-## Unreleased: Sessions M and N -- a reinforcement-learning framework, honest error bars, two guards
+## Unreleased: Sessions M, N and O -- a reinforcement-learning framework, honest error bars, and a surface that cannot be arbitraged
+
+### Session O (2026-09-29)
+
+Full accounts: README "Session O", `docs/rl-framework.md` (transaction costs), `study_h_readings.py`,
+`study_essvi.py`.
+
+#### Added
+- **`rl/cost_env.py`: hedging with proportional transaction costs, the first genuine MDP here.**
+  The Bellman equation solved on a grid under Black-Scholes is the answer key (its value matches
+  its policy's score to half an SE); `KnownCostFQI` keeps the known cost exact and learns the rest
+  from random-action transitions. It reaches the DP to 0.0009 of the premium at 32 dates and beats
+  every closed-form rule; bootstrapping pays (+0.118 at 128 dates); Whalley-Wilmott loses to the
+  delta at 32 dates and is 10% short of the DP at 128. `study_rl.py T`, `captures/rl_costs.png`.
+- **`fit/essvi.py`: eSSVI, calendar- and butterfly-arbitrage-free by construction** -- sequential
+  slice fitting inside the no-arbitrage set, no scipy. Graded in `study_essvi.py`: 0.03 vp of fit
+  given up on exact vols; under 0.3 vp of noise closer to the true surface than raw SVI in 20 of 20
+  draws (0.149 against 0.194 vp), while raw SVI was arbitrageable in 90%. The report's chain
+  section audits both on the recorded surface.
+- **`study_h_readings.py`: every reading of H graded** -- the skew slope at the synthetic truth,
+  the history readings over 21 histories, the filter profile at 250-2000 days -- and the report
+  prints each reading's scorecard beside it.
+- **`filters.kalman.filter_bank(temper=)`**: the bank's likelihood raised to 1/ratio^2. Its 95%
+  coverage goes from 43% to 95%; the report shows the tempered bank.
+- **A data-quality ledger** (`surface_from_snapshot(ledger=)`): every quote left out, and why.
+- **`python volsurf.py guard --install-hook`**: the guard as a pre-commit hook, which refuses the
+  commit instead of reporting the push; `--staged`, `--repo`, `--uninstall-hook`, and
+  VOLSURF_VISIBILITY to say the visibility offline. `doctor` reports whether it is installed.
+- `test_essvi.py` (12 checks); `test_rl.py` +7, `test_recording.py` +6, `test_volsurf.py` +6,
+  `test_protocol.py` +3; four standing health checks (141 in total).
+
+#### Fixed
+- **A quote with no two-sided market was priced at IBKR's model price** in the pipeline's surface
+  -- `Quote.mid` falls back to it, and `half_spread` to its half-cent floor, so it entered the
+  calibration with about the tightest error bar a quote can have. A two-sided market is now required.
+- **Duplicate records were used twice.** The recorder's seed pass and grid sweep request the
+  overlapping strikes twice; a snapshot held 145 records for 140 contracts. The surface keeps the
+  later record of each.
+- The report's "Four readings of H" heading was fixed text over a variable number of rows.
+
+#### Corrected
+- The skew slope was presented as a reading of H. The power law is an asymptote this chain never
+  reaches: the model's exact skews give -0.024 over 2-90 days for H = 0.10.
 
 ### Session N (2026-09-27)
 

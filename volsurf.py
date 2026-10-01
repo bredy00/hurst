@@ -10,6 +10,7 @@ One entry point for everything in this project.
     python volsurf.py study [name ...]   a study script, or list them
     python volsurf.py rl [section ...]   the reinforcement-learning study (off by default)
     python volsurf.py record --check     the IBKR smoke test (needs IB Gateway)
+    python volsurf.py guard [--install-hook]   licensed recordings never reach a public repository
 
 There was no single entry point before Session M: the README listed twenty commands and you
 had to know which one answered your question. `doctor` in particular exists because the two
@@ -34,6 +35,8 @@ STUDIES = {
     "trial": ("study_trial_bl_hurst.py", "Black-Litterman, FF4 and the dual Kalman filter on H"),
     "rl": ("study_rl.py", "the reinforcement-learning framework, graded"),
     "h-error-bars": ("study_h_error_bars.py", "the profile's robust SE on H against its true spread, 21 seeds"),
+    "h-readings": ("study_h_readings.py", "every reading of H graded; does the history's bias shrink with data?"),
+    "essvi": ("study_essvi.py", "eSSVI against raw SVI where the true surface is known, with and without noise"),
     "finer-lift": ("study_finer_lift.py", "the Session H lift decision (24 / 32 / 40)"),
     "zero-boundary": ("study_zero_boundary.py", "Kalman vs cf vs particle filter at the zero boundary"),
     "fbm": ("study_fbm_methods.py", "fBm generators compared; Shevchenko's steps checked"),
@@ -104,6 +107,11 @@ def cmd_doctor(_):
     print(f"RL framework     {'ON' if rl.is_enabled() else 'off'} "
           f"({'set VOLSURF_RL=1 or call rl.enable() to turn it on' if not rl.is_enabled() else ''})")
 
+    hook = ROOT / ".git" / "hooks" / "pre-commit"
+    has_hook = hook.exists() and HOOK_MARK in hook.read_text(encoding="utf-8", errors="replace")
+    print(f"guard hook       {'installed' if has_hook else 'not installed'}"
+          + ("" if has_hook else " (python volsurf.py guard --install-hook: refuses a commit that would "
+                                 "publish a recording)"))
     real = list((ROOT / "captures" / "real").glob("SPY*")) if (ROOT / "captures" / "real").exists() else []
     print(f"recorded data    {len(real)} SPY recording(s) under captures/real")
     if not real:
@@ -172,15 +180,23 @@ def licensed_paths(paths):
     return out
 
 
-def repo_visibility():
-    """'public', 'private', or None when it cannot be determined (no gh, no network)."""
+def repo_visibility(repo=ROOT):
+    """'public', 'private', 'internal', or None when it cannot be determined (no gh, no network).
+    VOLSURF_VISIBILITY overrides it -- offline, or in a test that must not ask GitHub."""
+    forced = os.environ.get("VOLSURF_VISIBILITY", "").strip().lower()
+    if forced in ("public", "private", "internal"):
+        return forced
     try:
         out = subprocess.run(["gh", "repo", "view", "--json", "visibility", "-q", ".visibility"],
-                             cwd=str(ROOT), capture_output=True, text=True, timeout=20)
+                             cwd=str(repo), capture_output=True, text=True, timeout=20)
         v = out.stdout.strip().lower()
         return v if v in ("public", "private", "internal") else None
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def _git_lines(repo, *args):
+    return subprocess.run(["git", *args], cwd=str(repo), capture_output=True, text=True).stdout.split()
 
 
 def cmd_guard(a):
@@ -191,29 +207,86 @@ def cmd_guard(a):
     .gitignore deliberately leaves them trackable so a PRIVATE repository backs them up. On a
     public repository that same rule would publish them on the first commit after the
     account goes live -- an irreversible mistake, since a pushed file is copied and cached.
-    Locally this checks tracked files AND the untracked files `git add -A` would pick up;
-    in CI (`--ci public|private`) it checks what the checkout holds.
+
+      (default)       tracked files, and the untracked ones `git add -A` would pick up
+      --staged        what the next commit would contain -- the pre-commit hook's check
+      --ci VIS        what the checkout holds, with the visibility CI knows
+
+    The visibility is only asked for when a recording is actually in scope, so the hook costs
+    a git call and nothing more on an ordinary commit.
     """
-    vis = a.ci or repo_visibility()
-    tracked = subprocess.run(["git", "ls-files"], cwd=str(ROOT), capture_output=True,
-                             text=True).stdout.split()
-    stageable = [] if a.ci else subprocess.run(
-        ["git", "ls-files", "--others", "--exclude-standard"], cwd=str(ROOT),
-        capture_output=True, text=True).stdout.split()
-    hit_t, hit_s = licensed_paths(tracked), licensed_paths(stageable)
+    if a.install_hook or a.uninstall_hook:
+        return install_hook(a.repo, remove=a.uninstall_hook)
+    repo = pathlib.Path(a.repo) if a.repo else ROOT
+    if a.staged:
+        scope = {"staged for the next commit": _git_lines(repo, "diff", "--cached", "--name-only",
+                                                          "--diff-filter=ACMR")}
+    else:
+        scope = {"tracked by git": _git_lines(repo, "ls-files")}
+        if not a.ci:
+            scope["untracked but stageable"] = _git_lines(repo, "ls-files", "--others", "--exclude-standard")
+    hits = {k: licensed_paths(v) for k, v in scope.items()}
+    found = [p_ for v in hits.values() for p_ in v]
+    vis = a.ci or (repo_visibility(repo) if found else None)
+    print(f"recordings {', '.join(f'{k}: {len(v)}' for k, v in hits.items())}")
+    for p_ in found[:10]:
+        print(f"  {p_}")
+    if not found:
+        print("ok: nothing licensed can be published from here")
+        return 0
     print(f"repository visibility: {vis or 'unknown (gh unavailable)'}")
-    print(f"recordings tracked by git: {len(hit_t)}; untracked but stageable: {len(hit_s)}")
-    for p in (hit_t + hit_s)[:10]:
-        print(f"  {p}")
-    if vis == "public" and (hit_t or hit_s):
+    if vis == "public":
         print("\nREFUSED: licensed recordings would be published by this public repository. "
               "Make the repository private, or add captures/real/ to .gitignore, before committing.")
         return 1
-    if vis is None and (hit_t or hit_s):
+    if vis is None:
         print("\nWARNING: recordings present and the visibility could not be checked; confirm the "
-              "repository is private before pushing.")
-        return 0 if not a.strict else 1
-    print("ok: nothing licensed can be published from here")
+              "repository is private before pushing (VOLSURF_VISIBILITY=private says so offline).")
+        return 1 if a.strict else 0
+    print("ok: the repository is not public")
+    return 0
+
+
+HOOK_MARK = "volsurf licensed-data guard"
+
+
+def install_hook(repo=None, remove=False):
+    """
+    Install (or remove) a pre-commit hook that runs `guard --staged --strict`, so a commit that
+    would put a licensed recording into a public repository is refused before it exists --
+    CI's guard can only report it after the push, when it is already published. An existing
+    hook that is not this one is left alone. Undo: `python volsurf.py guard --uninstall-hook`.
+    """
+    repo = pathlib.Path(repo) if repo else ROOT
+    hooks = pathlib.Path(subprocess.run(["git", "rev-parse", "--git-path", "hooks"], cwd=str(repo),
+                                        capture_output=True, text=True).stdout.strip() or ".git/hooks")
+    hooks = hooks if hooks.is_absolute() else repo / hooks
+    path = hooks / "pre-commit"
+    ours = path.exists() and HOOK_MARK in path.read_text(encoding="utf-8", errors="replace")
+    if remove:
+        if ours:
+            path.unlink()
+            print(f"removed {path}")
+        else:
+            print(f"no {HOOK_MARK} hook at {path}")
+        return 0
+    if path.exists() and not ours:
+        print(f"{path} exists and is not this guard's; left alone. Add this line to it instead:\n"
+              f"  \"{pathlib.Path(sys.executable).as_posix()}\" \"{(ROOT / 'volsurf.py').as_posix()}\" "
+              f"guard --staged --strict --repo \"$(git rev-parse --show-toplevel)\" || exit 1")
+        return 1
+    hooks.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\n"
+                    f"# {HOOK_MARK} (installed by `python volsurf.py guard --install-hook`; remove with\n"
+                    "# `python volsurf.py guard --uninstall-hook`)\n"
+                    f"exec \"{pathlib.Path(sys.executable).as_posix()}\" \"{(ROOT / 'volsurf.py').as_posix()}\" "
+                    "guard --staged --strict --repo \"$(git rev-parse --show-toplevel)\"\n",
+                    encoding="utf-8", newline="\n")
+    try:
+        path.chmod(0o755)
+    except OSError:
+        pass
+    print(f"installed {path}")
     return 0
 
 
@@ -247,6 +320,10 @@ def main(argv=None):
     p = sub.add_parser("guard", help="refuse to publish licensed recordings from a public repo")
     p.add_argument("--ci", choices=("public", "private", "internal"), help="visibility, as CI knows it")
     p.add_argument("--strict", action="store_true", help="fail when the visibility is unknown")
+    p.add_argument("--staged", action="store_true", help="check what the next commit would contain")
+    p.add_argument("--repo", help="another repository (default: this one)")
+    p.add_argument("--install-hook", action="store_true", help="run --staged --strict before every commit")
+    p.add_argument("--uninstall-hook", action="store_true", help="remove that hook")
     p.set_defaults(fn=cmd_guard)
 
     a = ap.parse_args(argv)

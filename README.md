@@ -9,6 +9,7 @@ volatility_surface_2.py               six runtime fixes, maths untouched
 volsurf_core.py                       pure maths: no IO, no scipy, no matplotlib
 volatility_surface_3.py               v2's fixes + correct coordinates; the live dashboard (--demo: no TWS)
 fit/svi.py                            raw SVI slice fitting, scipy-free
+fit/essvi.py                          eSSVI: no calendar or butterfly arbitrage by construction (Session O)
 sources/replay.py                     JSON record / replay of a chain snapshot
 sources/history.py                    daily history -> realised / Garman-Klass / implied variance
 sources/synthetic.py                  a recording and a history with a KNOWN answer
@@ -55,6 +56,8 @@ study_egarch.py                       the T-EGARCH scan against rough Heston, wi
 study_trial_bl_hurst.py               the Session L trial: Black-Litterman, FF4 and a dual Kalman filter on H
 study_rl.py                           the reinforcement-learning framework, graded against what is already here
 study_h_error_bars.py                 Session N: the robust SE on H graded against its real spread, 21 seeds
+study_h_readings.py                   Session O: every reading of H graded; does the bias shrink with data?
+study_essvi.py                        Session O: eSSVI against raw SVI where the true surface is known
 volsurf.py                            one entry point: doctor, health, test, demo, pipeline, study, rl, record, guard
 benchmark_riccati.py                  einsum vs matmul vs pinned BLAS in the Riccati step, per n_u
 debug_fbm_helper.py                   the Session A fBm fixture bug, reproduced
@@ -70,19 +73,24 @@ test_rough.py                         81 checks   (Session D + G + I: kernel, li
 test_rough_calibration.py             35 checks   (Session E: calibration, H, skew; G: weights)
 test_hawkes.py                        52 checks   (Session F1 + I: Hawkes on three hosts, jump size by impact)
 test_filters.py                       46 checks   (Session F2 + G: Kalman on three hosts, learning H)
-test_recording.py                     38 checks   (Session G: IBKR recording offline, pipeline end to end)
+test_recording.py                     44 checks   (Session G: IBKR recording offline, pipeline end to end;
+                                                   O: the data-quality ledger against planted defects)
 test_clock.py                         45 checks   (Session H: NYSE calendar, variance time, omega estimator)
 test_nongaussian.py                   20 checks   (Session H: particle and cf filters; slow tier)
-test_protocol.py                      14 checks   (Session I: RV cf filter, zero-boundary protocol; N: robust SE)
+test_protocol.py                      17 checks   (Session I: RV cf filter, zero-boundary protocol; N: robust SE;
+                                                   O: the tempered bank)
 test_fbm.py                           23 checks   (Session I: exact fGn / fBm, Breuer-Major; L: any covariance)
 test_hedging.py                       14 checks   (Sessions J-K: hedged Monte Carlo, variance swap)
 test_egarch.py                        17 checks   (Session L: EGARCH-t, Beta-t-EGARCH, GARCH)
 test_portfolio.py                     42 checks   (Session L trial: demo market, Black-Litterman, dual Kalman)
-test_rl.py                            47 checks   (Session M: the MDP, the agents, the Markov test, both environments;
-                                                   N: the vertex agent, the known-reward regression, the mark)
+test_rl.py                            54 checks   (Session M: the MDP, the agents, the Markov test, both environments;
+                                                   N: the vertex agent, the known-reward regression, the mark;
+                                                   O: transaction costs, the DP and the known-cost learner)
 test_har.py                           13 checks   (Session N: HAR-RV -- design, recovery, log-HAR correction, QLIKE)
-test_volsurf.py                        4 checks   (Session N: the entry point and the licensed-data guard)
-rl/                                   reinforcement learning, OFF by default (7 modules; delete to revert)
+test_volsurf.py                       10 checks   (Session N: the entry point and the licensed-data guard;
+                                                   O: the pre-commit hook, on real commits in a temp repo)
+test_essvi.py                         12 checks   (Session O: eSSVI slices, the calendar guard, fitting)
+rl/                                   reinforcement learning, OFF by default (8 modules; delete to revert)
 models/egarch.py                      EGARCH(p,q)-t, Beta-t-EGARCH and GARCH: one interface, BIC scan, QLIKE
 models/har.py                         HAR-RV at any horizon; log-HAR with its lognormal correction; Newey-West
 portfolio/                            the Session L trial, self-contained (5 modules; delete to revert)
@@ -118,19 +126,21 @@ captures/                             frames, GIFs, comparisons, snapshot.json
 .venv/Scripts/python.exe test_hawkes.py    # 52 passed, ~20 s
 .venv/Scripts/python.exe test_egarch.py    # 17 passed, ~25 s
 .venv/Scripts/python.exe test_portfolio.py # 42 passed, ~5 s
-.venv/Scripts/python.exe test_rl.py        # 47 passed, ~25 s
+.venv/Scripts/python.exe test_rl.py        # 54 passed, ~1 min
 .venv/Scripts/python.exe test_har.py       # 13 passed, ~2 s
-.venv/Scripts/python.exe test_volsurf.py   # 4 passed, ~1 s
+.venv/Scripts/python.exe test_volsurf.py   # 10 passed, ~5 s
+.venv/Scripts/python.exe test_essvi.py     # 12 passed, ~50 s
 .venv/Scripts/python.exe test_filters.py   # 46 passed, ~10 min
 .venv/Scripts/python.exe capture_session_f.py # Session F figure
 .venv/Scripts/python.exe -m pytest -m "not slow"  # quick tier, ~3 min
-.venv/Scripts/python.exe test_recording.py # 38 passed, ~30 s (3 min on a throttled laptop)
-.venv/Scripts/python.exe -m pytest                # everything: 140 items, 810 checks (CI: ~12 min)
+.venv/Scripts/python.exe test_recording.py # 44 passed, ~1 min (4 on a throttled laptop)
+.venv/Scripts/python.exe -m pytest                # everything: 147 items, 844 checks (CI: ~15 min)
 .venv/Scripts/python.exe record_chains.py --check # IBKR smoke test (needs IB Gateway)
 .venv/Scripts/python.exe run_real_data.py --synthetic   # pipeline on a known answer
 .venv/Scripts/python.exe volatility_surface_3.py --demo # the live dashboard on a fake market, no TWS
-.venv/Scripts/python.exe healthcheck.py --trend         # 137 analytical checks + trends
+.venv/Scripts/python.exe healthcheck.py --trend         # 141 analytical checks + trends
 .venv/Scripts/python.exe volsurf.py guard              # refuses if a public repo would publish recordings
+.venv/Scripts/python.exe volsurf.py guard --install-hook  # ...and refuse the commit itself, before it exists
 .venv/Scripts/python.exe capture_heston.py      # Heston's own skew term structure
 .venv/Scripts/python.exe capture_calibration.py # Phase 1 baseline vs a rough surface
 .venv/Scripts/python.exe capture_v3.py    # re-render + end-to-end validation
@@ -877,16 +887,62 @@ Five improvements across the system, each graded against something that knows th
   the one mistake here that cannot be undone. The guard refuses exactly that case; the
   gitignored report and synthetic output are exempt.
 
+## Session O (2026-09-29) -- every reading graded, a genuine MDP, a surface that cannot be arbitraged
+
+Five improvements, each graded where the answer is known -- and two defects the pipeline had
+carried since Session G, found by reading it rather than by a crash.
+
+- **Every reading of H in the report is graded** (`study_h_readings.py`), and the report prints
+  each one's scorecard beside it.
+  - *The skew slope is not an estimate of H.* The synthetic chain is priced exactly by the model,
+    and the model's own exact skews give -0.024 over its 2-90 days for a planted H = 0.10. The
+    power law is an asymptote: its local exponent is +0.048 at one day and below zero past nine.
+  - *The filter profile's bias is structural.* Mean 0.146 over 21 histories, robust intervals
+    covering 89%; but the bias does not shrink with data (+0.052 at 250 days, +0.064 at 1000,
+    +0.047 at 2000), so more history narrows the robust interval around the wrong value: its
+    coverage falls from 90% to 70%, the curvature's sits at 20%. The quasi-likelihood converges to about
+    0.15, not 0.10.
+  - *The filter bank* covered the truth 43% of the time as reported; tempered by the sandwich
+    ratio (`filter_bank(temper=)`) it covers 95%, and the report shows the tempered one.
+  - *The structure function* is the tightest reading here: mean 0.126, sd 0.020, with no error
+    bar of its own.
+- **Hedging with transaction costs, the first genuine MDP** (`rl/cost_env.py`, `study_rl.py T`).
+  The holding carried forward is the action, so this is not a bandit; under Black-Scholes the
+  Bellman equation is solved on a grid as the answer key. An agent that keeps the known cost
+  exact and learns the risk by moments **reaches the optimum to 0.0009 of the premium**,
+  model-free, and beats every closed-form rule. Bootstrapping finally pays (+0.118 at 128
+  dates). Whalley-Wilmott's band loses to plain delta hedging at 32 dates -- its half-width is
+  smaller than the delta's move between dates -- and is 10% short of the DP even at 128.
+- **eSSVI, a surface that cannot be arbitraged** (`fit/essvi.py`, `study_essvi.py`), open since
+  Session C. It costs 0.03 vol points of fit on exact vols; under 0.3 vp of quote noise it lands
+  *closer* to the true surface than raw SVI (0.149 against 0.194 vp, in every one of 20 draws),
+  while raw SVI fitted slice by slice was arbitrageable in 90% of them. Building it found that
+  the two textbook calendar conditions are necessary but not sufficient (37,483 of 200,000
+  random pairs satisfying both still crossed), so the guard checks a dense grid -- and out to
+  the point where the wings provably separate, after a pair was found crossing only between
+  k = 8 and 23.
+- **A data-quality ledger** in the surface builder: every quote left out, and why, in the
+  report. Two defects surfaced. A quote with no two-sided market was priced at IBKR's *model*
+  price with the half-cent floor as its spread -- the tightest error bar a quote can have; it
+  is now left out. And the recorder's seed pass and grid sweep overlap, so a snapshot held 145
+  records for 140 contracts, five counted twice by the calibration; one record per contract now.
+- **The guard as a pre-commit hook** (`python volsurf.py guard --install-hook`, installed here):
+  CI's guard can only report a recording after the push has published it, the hook refuses the
+  commit. It asks GitHub for the visibility only when a recording is staged, so an ordinary
+  commit costs one git call. `--uninstall-hook` removes it.
+
 ## Still open
 
 - **Real data has not been recorded yet.** It waits on the IBKR account's validation.
   Everything downstream has run end to end on synthetic recordings with a known answer.
-- **The history filter's H is biased upward on 500 days.** Session N made its error bar
-  honest; the estimate itself still sits +0.046 above a planted 0.10 on average over 21
-  seeds (`captures/h_error_bars.json`), and two of the 21 landed on the grid's edge. The
-  filter bank's posterior sd is built from the same quasi-likelihood and is as
-  over-confident as the curvature (+/- 0.023 against a robust 0.053 on the synthetic run);
-  tempering its likelihood by 1/ratio^2 is the natural fix and is not done.
+- **The history filter's H is biased upward, and more data does not fix it** (Session O,
+  `study_h_readings.py C`): the quasi-likelihood converges to about 0.15 for a planted 0.10.
+  The error bars are honest now (robust SE, tempered bank); the point estimate is not. A
+  simulation-based correction at the fitted parameters -- indirect inference, one profile per
+  replicate -- is the principled fix and is not built.
+- **Hedging with costs where no DP exists.** Session O's learner reaches the DP under
+  Black-Scholes; the contest that remains is rough Heston, against Whalley-Wilmott around
+  Hedged Monte Carlo's delta.
 - **The cf filter at a hard boundary.** It is 0.43 nats a day short of the converged
   particle filter at a host that sits at zero on 64% of days. A richer posterior than
   gamma(V) x Gaussian(U | V) would close part of that.
@@ -894,7 +950,7 @@ Five improvements across the system, each graded against something that knows th
   k = +0.08 call at 1000 steps).
 - Hawkes estimation from real event data, and the nearly-unstable Hawkes -> rough
   volatility link as a model rather than a citation.
-- eSSVI (calendar-arbitrage-free by construction; `essvi_calendar_ok` measures but does
-  not prevent).
-- The live IBKR path has still never run against a real TWS.
+- The live IBKR path has still never run against a real TWS. (The recorder's seed pass and
+  grid sweep still request the overlapping strikes twice; the analysis now keeps one record
+  per contract, and the request logic is left for a session with a real TWS to test against.)
 - `volatility_surface_3.py` (~1100 lines) should be split.
