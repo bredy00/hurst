@@ -71,7 +71,7 @@ jobs:
       - name: install
         run: pip install -r requirements.txt
       - name: restore health-check history (trend over n CI runs)
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: captures/healthcheck_history.jsonl
           key: health-history-${{ github.run_id }}
@@ -80,19 +80,22 @@ jobs:
         env:
           FALSIFY_PATH: ${{ github.workspace }}/falsify-src
         run: pytest -q
+      # run even when pytest fails: one red test must not blank out the health report and its
+      # trend (Oct-Nov 2026: six weekly artifacts carried only the stale committed healthcheck.json)
       - name: health checks with trend
+        if: success() || failure()
         run: |
           set -o pipefail
           python healthcheck.py --md --trend | tee captures/healthcheck_ci.md
       - name: save health-check history
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: captures/healthcheck_history.jsonl
           key: health-history-${{ github.run_id }}
       - name: upload health report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: health-report
           path: |
