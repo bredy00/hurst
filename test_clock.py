@@ -239,11 +239,14 @@ def test_pipeline_clock():
     from test_recording import offline
     planted = 0.2
     flat = lambda k, tau, H: 0.16 + 1.0 * k * k                  # flat ATM forward variance on the planted clock
+    # the fake chain must be listed from the day the test runs: recordings carry the real UTC
+    # instant, and on fake_ib's default listing day (2026-09-15) the dailies ran out on
+    # 2026-10-06, leaving under four expiries in the 15-day window and omega unidentified
+    today = vc.new_york_date(datetime.datetime.now(datetime.timezone.utc))
     with tempfile.TemporaryDirectory() as d, offline():
-        cls = fake_ib.make_fake(v3.LiveSurfaceApp, iv_fn=flat,
+        cls = fake_ib.make_fake(v3.LiveSurfaceApp, iv_fn=flat, today=today,
                                 variance_clock=lambda now, day: vc.variance_time(now, day, planted))
         app = v3.connect_app("SPY", port=4001, market_data_type=1, app_factory=cls, spot_timeout=2.0)
-        today = vc.new_york_date(datetime.datetime.now(datetime.timezone.utc))
         exps = v3.select_expiries_by_target(app.expirations, today, tuple(range(1, 16)), 1)
         paths = []
         for cycle in range(2):
